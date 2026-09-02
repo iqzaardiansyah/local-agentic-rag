@@ -1,7 +1,8 @@
 import os
 from dotenv import load_dotenv
 from typing import Annotated, TypedDict, Sequence
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+import re
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
@@ -60,16 +61,15 @@ llm = ChatOpenAI(
     base_url=LLM_BASE_URL,
     api_key=LLM_API_KEY,
     temperature=0.6,
-    model_kwargs={
-        "extra_body": {
-            "reasoning_effort": "xhigh",
-            "thinking": {
-                "type": "enabled",
-                "budget_tokens": 32768
-            }
+    extra_body={
+        "reasoning_effort": "xhigh",
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 32768
         }
     }
 )
+
 
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
@@ -102,6 +102,48 @@ def agent_node(state: AgentState):
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
+def grade_retrieval_node(state: AgentState):
+    """
+    Self-RAG / Corrective RAG (CRAG) Grader Node.
+    Evaluates retrieved local documents for relevance quality based on Cross-Encoder scores.
+    If local retrieval is insufficient or negative, injects corrective guidance to prevent hallucinations.
+    """
+    messages = state["messages"]
+    if not messages:
+        return {"messages": []}
+        
+    last_msg = messages[-1]
+    
+    # Check if the last action was from search_local_documents
+    if isinstance(last_msg, ToolMessage) and getattr(last_msg, "name", "") == "search_local_documents":
+        content = last_msg.content or ""
+        
+        # Check for error or empty conditions
+        is_empty = "No relevant information found" in content or "Error accessing" in content
+        
+        # Extract Cross-Encoder relevance scores
+        scores = re.findall(r"Relevance Score:\s*(-?\d+\.?\d*)", content)
+        max_score = max([float(s) for s in scores]) if scores else None
+        
+        # If no results or all scores are negative, trigger corrective feedback
+        if is_empty or (max_score is not None and max_score < 0.0):
+            feedback = (
+                "\n\n⚠️ [CRAG Verification: Low Local Document Relevance]\n"
+                "The local knowledge base does not contain strong matches for this query. "
+                "Guidance: Acknowledge the absence of local data or use `web_search` to verify on the internet."
+            )
+        else:
+            feedback = f"\n\n✅ [CRAG Verification: High Confidence Match (Score: {max_score:.3f})]"
+            
+        updated_msg = ToolMessage(
+            content=content + feedback,
+            name=last_msg.name,
+            tool_call_id=last_msg.tool_call_id
+        )
+        return {"messages": [updated_msg]}
+        
+    return {"messages": []}
+
 # 5. Define Graph Edges
 def should_continue(state: AgentState):
     """Determine whether to use a tool or return to the user."""
@@ -119,6 +161,7 @@ workflow = StateGraph(AgentState)
 
 workflow.add_node("agent", agent_node)
 workflow.add_node("action", tool_node)
+workflow.add_node("grade_retrieval", grade_retrieval_node)
 
 workflow.add_edge(START, "agent")
 
@@ -131,7 +174,8 @@ workflow.add_conditional_edges(
     }
 )
 
-workflow.add_edge("action", "agent")
+workflow.add_edge("action", "grade_retrieval")
+workflow.add_edge("grade_retrieval", "agent")
 
 # Compile the graph
 app = workflow.compile()
@@ -141,5 +185,5 @@ def run_agent(query: str):
     inputs = {"messages": [HumanMessage(content=query)]}
     for event in app.stream(inputs, stream_mode="values"):
         last_message = event["messages"][-1]
-        # In a real app, you might want to stream this or print intermediate steps
     return last_message.content
+

@@ -182,6 +182,16 @@ if prompt := st.chat_input("Ask a question, request data analysis, web research,
                                     "tool": tool_name,
                                     "output": tool_content[:1000]
                                 })
+                                
+                        elif node_name == "grade_retrieval":
+                            messages = node_output.get("messages", [])
+                            for msg in messages:
+                                content = getattr(msg, "content", "")
+                                if "High Confidence Match" in content:
+                                    st.markdown("🎯 **CRAG Grader:** `Verified local documents as relevant & grounded.`")
+                                elif "Low Local Document Relevance" in content:
+                                    st.markdown("⚠️ **CRAG Grader:** `Low relevance score. Guiding agent to avoid hallucination.`")
+
                 
                 status.update(label="✅ Agent finished reasoning and executing tools", state="complete", expanded=False)
                 
