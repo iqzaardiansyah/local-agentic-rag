@@ -16,3 +16,4 @@ duckduckgo-search>=5.0.0
 langchain-experimental>=0.0.60
 beautifulsoup4>=4.12.0
 torchvision>=0.18.0
+rank-bm25>=0.2.2
