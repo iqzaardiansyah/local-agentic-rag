@@ -32,6 +32,7 @@ from src.memory.episodic_memory import (
     store_episodic_memory,
     compact_messages_window
 )
+from src.tools.graph_tool import query_knowledge_graph
 
 # Load environment variables
 load_dotenv()
@@ -62,7 +63,8 @@ def web_search(query: str) -> str:
         return f"Error during web search: {e}"
 
 tools = [
-    search_local_documents, 
+    search_local_documents,
+    query_knowledge_graph,
     query_employee_database,
     mcp_list_tables,
     mcp_describe_table,
@@ -103,9 +105,13 @@ llm = ChatOpenAI(
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, MCP Database Introspection, Episodic Memory, and Parallel Subagent Orchestration capabilities.
+SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, MCP Database Introspection, Episodic Memory, GraphRAG Knowledge Graph, and Parallel Subagent Orchestration capabilities.
 Your goal is to help the user by utilizing the tools at your disposal and thinking through problems deeply and step-by-step.
 Before choosing an action or generating the final response, thoroughly think, analyze multiple hypotheses, and verify facts.
+
+Knowledge Graph & GraphRAG:
+- Use `query_knowledge_graph` to explore multi-hop relationships, organizational hierarchies, dependencies, and entity connections across the knowledge base.
+- Combine `query_knowledge_graph` with `search_local_documents` for deep, grounded hybrid retrieval.
 
 Episodic Memory & Long-Term Recall:
 - Use `recall_past_memory` to check for past user preferences, architectural decisions, and facts saved across previous sessions.
@@ -136,6 +142,7 @@ Direct Coding & Workspace Tools:
 Always answer accurately based on the information returned by the tools.
 If you don't know the answer even after searching, say you don't know.
 """
+
 
 # 4. Define Graph Nodes
 def agent_node(state: AgentState):

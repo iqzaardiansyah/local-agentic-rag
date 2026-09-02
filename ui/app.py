@@ -24,6 +24,7 @@ from src.rag.vectorstore import (
     clear_vectorstore,
     reindex_all_data
 )
+from src.rag.graph_rag import get_kg_engine
 from src.memory.episodic_memory import (
     list_all_memories,
     clear_all_memories,
@@ -44,9 +45,13 @@ with st.sidebar:
     # 1. Document Upload & Knowledge Base Management
     st.subheader("📚 Knowledge Base Manager")
     kb_stats = get_knowledge_base_stats()
+    kg_stats = get_kg_engine().get_graph_stats()
+    
     col_k1, col_k2 = st.columns(2)
-    col_k1.metric("Indexed Docs", kb_stats["total_files"])
-    col_k2.metric("Chroma Chunks", kb_stats["total_chunks"])
+    col_k1.metric("Chroma Chunks", kb_stats["total_chunks"])
+    col_k2.metric("KG Entities", kg_stats["total_entities"])
+    
+    st.caption(f"🕸️ **GraphRAG:** `{kg_stats['total_relationships']}` relational triples indexed.")
     
     with st.expander("📤 Upload & Ingest Documents", expanded=False):
         uploaded_files = st.file_uploader(
@@ -57,13 +62,18 @@ with st.sidebar:
         )
         if uploaded_files:
             if st.button("📥 Index Uploaded Files", use_container_width=True, type="primary"):
-                with st.spinner("Embedding and adding to ChromaDB..."):
+                with st.spinner("Embedding and adding to ChromaDB & GraphRAG..."):
                     res = save_and_ingest_uploaded_files(uploaded_files)
                     if res.get("success"):
                         st.success(f"Indexed {res['total_documents']} document(s) into {res['chunks']} chunks!")
                         st.rerun()
                     else:
                         st.error(res.get("message", "Ingestion failed."))
+
+    with st.expander("🕸️ Explore GraphRAG Triples", expanded=False):
+        st.markdown("**Top Connected Entity Hubs:**")
+        for hub in kg_stats.get("top_hubs", []):
+            st.markdown(f"- **`{hub['entity']}`** ({hub['connections']} connections)")
 
     if kb_stats["files"]:
         with st.expander("📄 View Knowledge Base Files", expanded=False):
@@ -72,7 +82,7 @@ with st.sidebar:
 
     col_reindex, col_clear_kb = st.columns(2)
     if col_reindex.button("🔄 Re-Index", use_container_width=True):
-        with st.spinner("Rebuilding ChromaDB..."):
+        with st.spinner("Rebuilding ChromaDB & GraphRAG..."):
             cnt = reindex_all_data()
             st.success(f"Re-indexed {cnt} chunks.")
             st.rerun()
@@ -83,6 +93,7 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+
 
     # 2. Episodic Long-Term Memory Manager
     st.subheader("🧠 Long-Term Memory")

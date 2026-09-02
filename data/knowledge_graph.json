@@ -1,0 +1,327 @@
+{
+  "directed": true,
+  "multigraph": true,
+  "graph": {},
+  "nodes": [
+    {
+      "type": "entity",
+      "id": "Local Agentic RAG"
+    },
+    {
+      "type": "entity",
+      "id": "LangGraph"
+    },
+    {
+      "type": "entity",
+      "id": "Ollama"
+    },
+    {
+      "type": "entity",
+      "id": "ChromaDB"
+    },
+    {
+      "type": "entity",
+      "id": "NetworkX"
+    },
+    {
+      "type": "entity",
+      "id": "Reflexion Auto-Debugger"
+    },
+    {
+      "type": "entity",
+      "id": "Cross-Encoder Reranker"
+    },
+    {
+      "type": "entity",
+      "id": "Hybrid Search RRF"
+    },
+    {
+      "type": "entity",
+      "id": "Episodic Memory"
+    },
+    {
+      "type": "entity",
+      "id": "Parallel Subagents"
+    },
+    {
+      "type": "entity",
+      "id": "Alice Smith"
+    },
+    {
+      "type": "entity",
+      "id": "Engineering"
+    },
+    {
+      "type": "entity",
+      "id": "Local AI Agent Hub"
+    },
+    {
+      "type": "entity",
+      "id": "Bob Jones"
+    },
+    {
+      "type": "entity",
+      "id": "Fiona Gallagher"
+    },
+    {
+      "type": "entity",
+      "id": "Charlie Brown"
+    },
+    {
+      "type": "entity",
+      "id": "Product"
+    },
+    {
+      "type": "entity",
+      "id": "Diana Prince"
+    },
+    {
+      "type": "entity",
+      "id": "Marketing"
+    },
+    {
+      "type": "entity",
+      "id": "Evan Wright"
+    },
+    {
+      "type": "entity",
+      "id": "HR"
+    },
+    {
+      "type": "entity",
+      "id": "$1,500,000"
+    },
+    {
+      "type": "entity",
+      "id": "$600,000"
+    },
+    {
+      "type": "entity",
+      "id": "$400,000"
+    },
+    {
+      "type": "entity",
+      "id": "$200,000"
+    },
+    {
+      "type": "entity",
+      "id": "Enterprise Semantic Search"
+    },
+    {
+      "type": "entity",
+      "id": "Q3 Global Marketing Push"
+    },
+    {
+      "type": "entity",
+      "id": "HR Automation Suite"
+    },
+    {
+      "type": "entity",
+      "id": "OmniLocal Platform"
+    },
+    {
+      "type": "entity",
+      "id": "FastEmbed for token embeddings"
+    },
+    {
+      "type": "entity",
+      "id": "Sarah Connor"
+    },
+    {
+      "type": "entity",
+      "id": "Cybernetics"
+    },
+    {
+      "type": "entity",
+      "id": "$850,000"
+    }
+  ],
+  "edges": [
+    {
+      "relation": "USES",
+      "type": "architecture",
+      "source": "Local Agentic RAG",
+      "target": "LangGraph",
+      "key": "USES"
+    },
+    {
+      "relation": "USES",
+      "type": "llm_backend",
+      "source": "Local Agentic RAG",
+      "target": "Ollama",
+      "key": "USES"
+    },
+    {
+      "relation": "USES",
+      "type": "vectorstore",
+      "source": "Local Agentic RAG",
+      "target": "ChromaDB",
+      "key": "USES"
+    },
+    {
+      "relation": "USES",
+      "type": "knowledge_graph",
+      "source": "Local Agentic RAG",
+      "target": "NetworkX",
+      "key": "USES"
+    },
+    {
+      "relation": "INCLUDES",
+      "type": "feature",
+      "source": "Local Agentic RAG",
+      "target": "Reflexion Auto-Debugger",
+      "key": "INCLUDES"
+    },
+    {
+      "relation": "INCLUDES",
+      "type": "feature",
+      "source": "Local Agentic RAG",
+      "target": "Cross-Encoder Reranker",
+      "key": "INCLUDES"
+    },
+    {
+      "relation": "INCLUDES",
+      "type": "feature",
+      "source": "Local Agentic RAG",
+      "target": "Hybrid Search RRF",
+      "key": "INCLUDES"
+    },
+    {
+      "relation": "INCLUDES",
+      "type": "feature",
+      "source": "Local Agentic RAG",
+      "target": "Episodic Memory",
+      "key": "INCLUDES"
+    },
+    {
+      "relation": "INCLUDES",
+      "type": "feature",
+      "source": "Local Agentic RAG",
+      "target": "Parallel Subagents",
+      "key": "INCLUDES"
+    },
+    {
+      "relation": "LEADS",
+      "title": "Principal AI Architect",
+      "source": "Alice Smith",
+      "target": "Engineering",
+      "key": "LEADS"
+    },
+    {
+      "relation": "MANAGES",
+      "role": "Lead",
+      "source": "Alice Smith",
+      "target": "Local AI Agent Hub",
+      "key": "MANAGES"
+    },
+    {
+      "relation": "HAS_BUDGET",
+      "currency": "USD",
+      "source": "Engineering",
+      "target": "$1,500,000",
+      "key": "HAS_BUDGET"
+    },
+    {
+      "relation": "BELONGS_TO",
+      "status": "Active",
+      "source": "Local AI Agent Hub",
+      "target": "Engineering",
+      "key": "BELONGS_TO"
+    },
+    {
+      "relation": "WORKS_IN",
+      "title": "Senior DevOps Engineer",
+      "source": "Bob Jones",
+      "target": "Engineering",
+      "key": "WORKS_IN"
+    },
+    {
+      "relation": "WORKS_IN",
+      "title": "ML Systems Engineer",
+      "source": "Fiona Gallagher",
+      "target": "Engineering",
+      "key": "WORKS_IN"
+    },
+    {
+      "relation": "LEADS",
+      "title": "Lead Product Manager",
+      "source": "Charlie Brown",
+      "target": "Product",
+      "key": "LEADS"
+    },
+    {
+      "relation": "HAS_BUDGET",
+      "currency": "USD",
+      "source": "Product",
+      "target": "$600,000",
+      "key": "HAS_BUDGET"
+    },
+    {
+      "relation": "LEADS",
+      "title": "Growth Marketing Director",
+      "source": "Diana Prince",
+      "target": "Marketing",
+      "key": "LEADS"
+    },
+    {
+      "relation": "HAS_BUDGET",
+      "currency": "USD",
+      "source": "Marketing",
+      "target": "$400,000",
+      "key": "HAS_BUDGET"
+    },
+    {
+      "relation": "LEADS",
+      "title": "People Operations Lead",
+      "source": "Evan Wright",
+      "target": "HR",
+      "key": "LEADS"
+    },
+    {
+      "relation": "HAS_BUDGET",
+      "currency": "USD",
+      "source": "HR",
+      "target": "$200,000",
+      "key": "HAS_BUDGET"
+    },
+    {
+      "relation": "BELONGS_TO",
+      "status": "Completed",
+      "source": "Enterprise Semantic Search",
+      "target": "Engineering",
+      "key": "BELONGS_TO"
+    },
+    {
+      "relation": "BELONGS_TO",
+      "status": "Active",
+      "source": "Q3 Global Marketing Push",
+      "target": "Marketing",
+      "key": "BELONGS_TO"
+    },
+    {
+      "relation": "BELONGS_TO",
+      "status": "Planning",
+      "source": "HR Automation Suite",
+      "target": "HR",
+      "key": "BELONGS_TO"
+    },
+    {
+      "relation": "USES",
+      "source": "OmniLocal Platform",
+      "target": "FastEmbed for token embeddings",
+      "key": "USES"
+    },
+    {
+      "relation": "LEADS",
+      "source": "Sarah Connor",
+      "target": "Cybernetics",
+      "key": "LEADS"
+    },
+    {
+      "relation": "HAS_BUDGET",
+      "source": "Cybernetics",
+      "target": "$850,000",
+      "key": "HAS_BUDGET"
+    }
+  ]
+}

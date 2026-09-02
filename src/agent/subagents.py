@@ -27,6 +27,7 @@ from src.tools.coding_tools import (
     find_files_by_pattern
 )
 from src.tools.web_scraper import read_webpage
+from src.tools.graph_tool import query_knowledge_graph
 from duckduckgo_search import DDGS
 
 @tool
@@ -42,12 +43,13 @@ def subagent_web_search(query: str) -> str:
 
 # Tool profiles per subagent role
 ROLE_TOOLS = {
-    "researcher": [subagent_web_search, read_webpage, search_local_documents],
+    "researcher": [query_knowledge_graph, subagent_web_search, read_webpage, search_local_documents],
     "coder": [execute_python_code, execute_terminal_command, read_local_file, write_local_file, grep_search, view_code_slice, list_directory_tree, find_files_by_pattern],
-    "data_analyst": [mcp_list_tables, mcp_describe_table, mcp_execute_query, query_employee_database, execute_python_code, read_local_file, search_local_documents],
-    "rag_specialist": [search_local_documents, read_local_file, subagent_web_search],
-    "custom": [mcp_list_tables, mcp_describe_table, mcp_execute_query, search_local_documents, query_employee_database, subagent_web_search, read_webpage, execute_python_code, execute_terminal_command, read_local_file, write_local_file]
+    "data_analyst": [query_knowledge_graph, mcp_list_tables, mcp_describe_table, mcp_execute_query, query_employee_database, execute_python_code, read_local_file, search_local_documents],
+    "rag_specialist": [query_knowledge_graph, search_local_documents, read_local_file, subagent_web_search],
+    "custom": [query_knowledge_graph, mcp_list_tables, mcp_describe_table, mcp_execute_query, search_local_documents, query_employee_database, subagent_web_search, read_webpage, execute_python_code, execute_terminal_command, read_local_file, write_local_file]
 }
+
 
 
 ROLE_PROMPTS = {
