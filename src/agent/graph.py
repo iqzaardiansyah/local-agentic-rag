@@ -9,7 +9,12 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 from src.tools.rag_tool import search_local_documents
-from src.tools.mcp_tool import query_employee_database
+from src.tools.mcp_tool import (
+    query_employee_database,
+    mcp_list_tables,
+    mcp_describe_table,
+    mcp_execute_query
+)
 from src.tools.coding_tools import (
     execute_python_code,
     read_local_file,
@@ -53,7 +58,10 @@ def web_search(query: str) -> str:
 
 tools = [
     search_local_documents, 
-    query_employee_database, 
+    query_employee_database,
+    mcp_list_tables,
+    mcp_describe_table,
+    mcp_execute_query,
     web_search,
     read_webpage,
     execute_terminal_command,
@@ -88,7 +96,7 @@ llm = ChatOpenAI(
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, and Parallel Subagent Orchestration capabilities.
+SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, MCP Database Introspection, and Parallel Subagent Orchestration capabilities.
 Your goal is to help the user by utilizing the tools at your disposal and thinking through problems deeply and step-by-step.
 Before choosing an action or generating the final response, thoroughly think, analyze multiple hypotheses, and verify facts.
 
@@ -96,9 +104,14 @@ Parallel Subagent Capabilities:
 - When a user request is complex, comparative, or multi-faceted (e.g. 'Compare X and Y, analyze DB records for Z, and test code for W'), you can use `spawn_parallel_subagents` to delegate up to 4 independent subtasks to run in parallel simultaneously across Ollama's 4 concurrent GPU slots.
 - Available subagent roles: 'researcher', 'coder', 'data_analyst', 'rag_specialist', 'custom'.
 
-Direct Tool Usage Guide:
+MCP Database Introspection & Querying:
+- Use `mcp_list_tables` to discover all tables in the SQLite database and see their record counts.
+- Use `mcp_describe_table` to inspect column names, types, primary keys, and foreign keys before writing queries.
+- Use `mcp_execute_query` to execute read-only SQL queries (aggregations, joins, filters) against the database.
+- Use `query_employee_database` for quick employee lookups.
+
+Direct Coding & Workspace Tools:
 - Use `search_local_documents` for general knowledge or checking user files in ChromaDB knowledge base.
-- Use `query_employee_database` to look up staff, departments, and salaries.
 - Use `web_search` to find up-to-date information, news, or general facts from the internet.
 - Use `read_webpage` if a search result URL looks highly relevant and you need to read its full content.
 - Use `list_directory_tree` to visually explore folders and see project structure.

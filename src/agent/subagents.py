@@ -1,7 +1,7 @@
 import os
 import concurrent.futures
-from typing import List, Dict, Any
-from langchain_core.messages import HumanMessage, SystemMessage
+from typing import List, Dict, Any, Annotated, Sequence, TypedDict
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END, START
@@ -10,7 +10,12 @@ from langgraph.prebuilt import ToolNode
 
 # Import toolkits
 from src.tools.rag_tool import search_local_documents
-from src.tools.mcp_tool import query_employee_database
+from src.tools.mcp_tool import (
+    query_employee_database,
+    mcp_list_tables,
+    mcp_describe_table,
+    mcp_execute_query
+)
 from src.tools.coding_tools import (
     execute_python_code,
     read_local_file,
@@ -39,10 +44,11 @@ def subagent_web_search(query: str) -> str:
 ROLE_TOOLS = {
     "researcher": [subagent_web_search, read_webpage, search_local_documents],
     "coder": [execute_python_code, execute_terminal_command, read_local_file, write_local_file, grep_search, view_code_slice, list_directory_tree, find_files_by_pattern],
-    "data_analyst": [query_employee_database, execute_python_code, read_local_file, search_local_documents],
+    "data_analyst": [mcp_list_tables, mcp_describe_table, mcp_execute_query, query_employee_database, execute_python_code, read_local_file, search_local_documents],
     "rag_specialist": [search_local_documents, read_local_file, subagent_web_search],
-    "custom": [search_local_documents, query_employee_database, subagent_web_search, read_webpage, execute_python_code, execute_terminal_command, read_local_file, write_local_file]
+    "custom": [mcp_list_tables, mcp_describe_table, mcp_execute_query, search_local_documents, query_employee_database, subagent_web_search, read_webpage, execute_python_code, execute_terminal_command, read_local_file, write_local_file]
 }
+
 
 ROLE_PROMPTS = {
     "researcher": "You are a specialized Research Subagent. Your mission is to gather accurate facts and summarize findings using search and scraping tools. Be factual and concise.",
@@ -51,6 +57,9 @@ ROLE_PROMPTS = {
     "rag_specialist": "You are a specialized Knowledge Base Subagent. Your mission is to search internal documents, verify retrieved facts, and extract relevant knowledge.",
     "custom": "You are an autonomous Task Subagent. Focus on solving the specific objective given to you using the available tools."
 }
+
+class SubagentState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
 
 def create_subagent_runner(role: str):
     """Factory to build an isolated single-loop subagent execution graph."""
@@ -74,18 +83,18 @@ def create_subagent_runner(role: str):
     tool_node = ToolNode(tools)
     system_prompt = ROLE_PROMPTS.get(role, ROLE_PROMPTS["custom"])
     
-    def subagent_node(state):
-        messages = state["messages"]
+    def subagent_node(state: SubagentState):
+        messages = list(state["messages"])
         if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=system_prompt)] + list(messages)
+            messages = [SystemMessage(content=system_prompt)] + messages
         response = bound_llm.invoke(messages)
         return {"messages": [response]}
         
-    def should_continue(state):
+    def should_continue(state: SubagentState):
         last_message = state["messages"][-1]
         return "continue" if last_message.tool_calls else "end"
         
-    builder = StateGraph(dict)
+    builder = StateGraph(SubagentState)
     builder.add_node("agent", subagent_node)
     builder.add_node("action", tool_node)
     builder.add_edge(START, "agent")
@@ -93,6 +102,7 @@ def create_subagent_runner(role: str):
     builder.add_edge("action", "agent")
     
     return builder.compile()
+
 
 def execute_single_subagent(subtask: Dict[str, str]) -> Dict[str, Any]:
     """Execute a single subagent task to completion."""
