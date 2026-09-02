@@ -27,55 +27,55 @@ An enterprise-grade, production-ready **Local Agentic AI Assistant** featuring c
 
 ```mermaid
 flowchart TD
-    subgraph UI_Layer [Streamlit UI & Observability Layer]
-        Chat[💬 Live Streaming Chat & st.status Observability]
-        Workbench[🛠️ Artifact & Code Diff Explorer / Terminal Runner]
-        KB_Manager[📚 Multi-Format Ingestion & Chroma/Graph Manager]
+    subgraph UI_Layer ["Streamlit UI & Observability Layer"]
+        Chat["💬 Live Streaming Chat & st.status Observability"]
+        Workbench["🛠️ Artifact & Code Diff Explorer / Terminal Runner"]
+        KB_Manager["📚 Multi-Format Ingestion & Chroma/Graph Manager"]
     end
 
-    subgraph Agent_Core [LangGraph Cyclic State Machine]
-        Supervisor[🤖 Lead Agent / Supervisor Node (Qwen 3.8 27B / xhigh reasoning)]
-        ToolRouter{Tools Execution Node}
-        Evaluator[🧠 Unified Evaluator Node]
+    subgraph Agent_Core ["LangGraph Cyclic State Machine"]
+        Supervisor["🤖 Lead Agent / Supervisor Node (Qwen 3.8 27B / xhigh reasoning)"]
+        ToolRouter{"Tools Execution Node"}
+        Evaluator["🧠 Unified Evaluator Node"]
         
-        CRAG[🎯 CRAG Relevance Grader]
-        Reflexion[🔧 Reflexion Code Auto-Debugger]
+        CRAG["🎯 CRAG Relevance Grader"]
+        Reflexion["🔧 Reflexion Code Auto-Debugger"]
     end
 
-    subgraph Intelligence_Subsystems [Modular Engine Subsystems]
-        subgraph Subagents [⚡ Parallel Subagent Fan-Out (OLLAMA_NUM_PARALLEL=4)]
-            Sub1[Researcher Subagent]
-            Sub2[Coder Subagent]
-            Sub3[Data Analyst Subagent]
-            Sub4[RAG Specialist Subagent]
+    subgraph Intelligence_Subsystems ["Modular Engine Subsystems"]
+        subgraph Subagents ["⚡ Parallel Subagent Fan-Out (OLLAMA_NUM_PARALLEL=4)"]
+            Sub1["Researcher Subagent"]
+            Sub2["Coder Subagent"]
+            Sub3["Data Analyst Subagent"]
+            Sub4["RAG Specialist Subagent"]
         end
         
-        subgraph Retrieval [🔍 2-Stage Hybrid RAG Pipeline]
-            BM25[Sparse BM25 Keyword Search]
-            ChromaDense[Dense ChromaDB Embeddings]
-            RRF[Reciprocal Rank Fusion (RRF)]
-            Reranker[Local Cross-Encoder (ms-marco-MiniLM)]
+        subgraph Retrieval ["🔍 2-Stage Hybrid RAG Pipeline"]
+            BM25["Sparse BM25 Keyword Search"]
+            ChromaDense["Dense ChromaDB Embeddings"]
+            RRF["Reciprocal Rank Fusion (RRF)"]
+            Reranker["Local Cross-Encoder (ms-marco-MiniLM)"]
         end
         
-        subgraph Memory [🧠 Hierarchical Memory System]
-            SlidingWindow[Sliding Window + Running Summary Compaction]
-            EpisodicChroma[Persistent Vector Episodic Memory]
+        subgraph Memory ["🧠 Hierarchical Memory System"]
+            SlidingWindow["Sliding Window + Running Summary Compaction"]
+            EpisodicChroma["Persistent Vector Episodic Memory"]
         end
         
-        subgraph GraphRAG_System [🕸️ Lightweight NetworkX GraphRAG]
-            KG[Directed Multigraph Triples Store]
-            MultiHop[1-Hop & 2-Hop BFS Path Traversal]
+        subgraph GraphRAG_System ["🕸️ Lightweight NetworkX GraphRAG"]
+            KG["Directed Multigraph Triples Store"]
+            MultiHop["1-Hop & 2-Hop BFS Path Traversal"]
         end
         
-        subgraph Protocols [🔌 Model Context Protocol (MCP)]
-            MCPServer[JSON-RPC 2.0 SQLite Server (Auto-Dispatched)]
-            SchemaIntrospect[Table Discovery & PRAGMA Introspection]
-            SafeSQL[Read-Only Parameterized Query Executor]
+        subgraph Protocols ["🔌 Model Context Protocol (MCP)"]
+            MCPServer["JSON-RPC 2.0 SQLite Server (Auto-Dispatched)"]
+            SchemaIntrospect["Table Discovery & PRAGMA Introspection"]
+            SafeSQL["Read-Only Parameterized Query Executor"]
         end
         
-        subgraph Sandbox [💻 Developer Sandbox ./workspace]
-            FileIO[Sandboxed File Write & Code Slicing]
-            Terminal[Subprocess Command Runner & Python REPL]
+        subgraph Sandbox ["💻 Developer Sandbox ./workspace"]
+            FileIO["Sandboxed File Write & Code Slicing"]
+            Terminal["Subprocess Command Runner & Python REPL"]
         end
     end
 
@@ -95,8 +95,8 @@ flowchart TD
     ToolRouter --> Evaluator
     Evaluator --> CRAG
     Evaluator --> Reflexion
-    CRAG -- Score Evaluation --> Supervisor
-    Reflexion -- Auto-Fix Directive --> Supervisor
+    CRAG -- "Score Evaluation" --> Supervisor
+    Reflexion -- "Auto-Fix Directive" --> Supervisor
 ```
 
 ---
