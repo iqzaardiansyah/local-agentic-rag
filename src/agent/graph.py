@@ -10,7 +10,16 @@ from langgraph.prebuilt import ToolNode
 
 from src.tools.rag_tool import search_local_documents
 from src.tools.mcp_tool import query_employee_database
-from src.tools.coding_tools import execute_python_code, read_local_file, write_local_file, execute_terminal_command
+from src.tools.coding_tools import (
+    execute_python_code,
+    read_local_file,
+    write_local_file,
+    execute_terminal_command,
+    list_directory_tree,
+    grep_search,
+    view_code_slice,
+    find_files_by_pattern
+)
 from src.tools.web_scraper import read_webpage
 
 # Load environment variables
@@ -49,7 +58,11 @@ tools = [
     execute_terminal_command,
     execute_python_code,
     read_local_file,
-    write_local_file
+    write_local_file,
+    list_directory_tree,
+    grep_search,
+    view_code_slice,
+    find_files_by_pattern
 ]
 tool_node = ToolNode(tools)
 
@@ -70,22 +83,25 @@ llm = ChatOpenAI(
     }
 )
 
-
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are OmniLocal-Agent, an advanced, locally-hosted AI assistant.
+SYSTEM_PROMPT = """You are OmniLocal-Agent, an advanced, locally-hosted AI assistant with Full Coding and Workspace Exploration capabilities.
 Your goal is to help the user by utilizing the tools at your disposal and thinking through problems deeply and step-by-step.
 Before choosing an action or generating the final response, thoroughly think, analyze multiple hypotheses, and verify facts.
 
 Tool Usage Guide:
-- Use `search_local_documents` for general knowledge or checking user files.
+- Use `search_local_documents` for general knowledge or checking user files in ChromaDB knowledge base.
 - Use `query_employee_database` to look up staff, departments, and salaries.
 - Use `web_search` to find up-to-date information, news, or general facts from the internet.
 - Use `read_webpage` if a search result URL looks highly relevant and you need to read its full content.
-- Use `execute_python_code` (like ChatGPT Advanced Data Analysis) to perform calculations, data analysis, or test logic locally. ALWAYS print() your results inside the code so you can read them.
-- Use `execute_terminal_command` (like Claude Code/Antigravity) to execute bash/shell commands, run Node.js/C++/Go code, run tests, or manage the operating system.
-- Use `read_local_file` and `write_local_file` to act as a coding assistant and modify the user's workspace directly when they ask you to write code or read their files.
+- Use `list_directory_tree` to visually explore folders and see project structure.
+- Use `grep_search` to search text/regex across codebase files with line numbers.
+- Use `view_code_slice` to inspect specific lines of code without dumping full files.
+- Use `find_files_by_pattern` to find files by glob (e.g. `*.py`, `*.json`).
+- Use `execute_python_code` to perform calculations, data analysis, or test logic locally. ALWAYS print() results.
+- Use `execute_terminal_command` to execute bash/shell commands, run Node.js/C++/Go code, run tests, or manage workspace.
+- Use `read_local_file` and `write_local_file` to inspect files and create/modify code safely inside the `./workspace` sandbox.
 
 Always answer accurately based on the information returned by the tools.
 If you don't know the answer even after searching, say you don't know.
