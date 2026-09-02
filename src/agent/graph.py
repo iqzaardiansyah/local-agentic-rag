@@ -21,6 +21,7 @@ from src.tools.coding_tools import (
     find_files_by_pattern
 )
 from src.tools.web_scraper import read_webpage
+from src.agent.subagents import spawn_parallel_subagents
 
 # Load environment variables
 load_dotenv()
@@ -62,7 +63,8 @@ tools = [
     list_directory_tree,
     grep_search,
     view_code_slice,
-    find_files_by_pattern
+    find_files_by_pattern,
+    spawn_parallel_subagents
 ]
 tool_node = ToolNode(tools)
 
@@ -86,11 +88,15 @@ llm = ChatOpenAI(
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are OmniLocal-Agent, an advanced, locally-hosted AI assistant with Full Coding and Workspace Exploration capabilities.
+SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, and Parallel Subagent Orchestration capabilities.
 Your goal is to help the user by utilizing the tools at your disposal and thinking through problems deeply and step-by-step.
 Before choosing an action or generating the final response, thoroughly think, analyze multiple hypotheses, and verify facts.
 
-Tool Usage Guide:
+Parallel Subagent Capabilities:
+- When a user request is complex, comparative, or multi-faceted (e.g. 'Compare X and Y, analyze DB records for Z, and test code for W'), you can use `spawn_parallel_subagents` to delegate up to 4 independent subtasks to run in parallel simultaneously across Ollama's 4 concurrent GPU slots.
+- Available subagent roles: 'researcher', 'coder', 'data_analyst', 'rag_specialist', 'custom'.
+
+Direct Tool Usage Guide:
 - Use `search_local_documents` for general knowledge or checking user files in ChromaDB knowledge base.
 - Use `query_employee_database` to look up staff, departments, and salaries.
 - Use `web_search` to find up-to-date information, news, or general facts from the internet.
