@@ -205,6 +205,11 @@ if prompt := st.chat_input("Ask a question, request data analysis, web research,
                                 st.markdown("🎯 **CRAG Grader:** `Verified local documents as relevant & grounded.`")
                             elif "Low Local Document Relevance" in content:
                                 st.markdown("⚠️ **CRAG Grader:** `Low relevance score. Guiding agent to avoid hallucination.`")
+                            elif "Reflexion Auto-Debugger: Execution Failure Detected" in content:
+                                st.markdown("🔧 **Reflexion Auto-Debugger:** `Execution error caught! Guiding agent into auto-fix loop...`")
+                            elif "Reflexion Auto-Debugger: Execution verified" in content:
+                                st.markdown("🎯 **Reflexion Auto-Debugger:** `Code execution verified with zero errors.`")
+
 
             if not status_closed:
                 status_box.update(label="✅ Agent finished reasoning and executing", state="complete", expanded=False)
