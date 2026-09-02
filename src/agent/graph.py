@@ -27,6 +27,11 @@ from src.tools.coding_tools import (
 )
 from src.tools.web_scraper import read_webpage
 from src.agent.subagents import spawn_parallel_subagents
+from src.memory.episodic_memory import (
+    recall_past_memory,
+    store_episodic_memory,
+    compact_messages_window
+)
 
 # Load environment variables
 load_dotenv()
@@ -62,6 +67,8 @@ tools = [
     mcp_list_tables,
     mcp_describe_table,
     mcp_execute_query,
+    recall_past_memory,
+    store_episodic_memory,
     web_search,
     read_webpage,
     execute_terminal_command,
@@ -96,9 +103,13 @@ llm = ChatOpenAI(
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, MCP Database Introspection, and Parallel Subagent Orchestration capabilities.
+SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, MCP Database Introspection, Episodic Memory, and Parallel Subagent Orchestration capabilities.
 Your goal is to help the user by utilizing the tools at your disposal and thinking through problems deeply and step-by-step.
 Before choosing an action or generating the final response, thoroughly think, analyze multiple hypotheses, and verify facts.
+
+Episodic Memory & Long-Term Recall:
+- Use `recall_past_memory` to check for past user preferences, architectural decisions, and facts saved across previous sessions.
+- Use `store_episodic_memory` to save important user preferences, rules, or key project insights into persistent long-term vector memory.
 
 Parallel Subagent Capabilities:
 - When a user request is complex, comparative, or multi-faceted (e.g. 'Compare X and Y, analyze DB records for Z, and test code for W'), you can use `spawn_parallel_subagents` to delegate up to 4 independent subtasks to run in parallel simultaneously across Ollama's 4 concurrent GPU slots.
@@ -134,8 +145,11 @@ def agent_node(state: AgentState):
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
         
-    response = llm_with_tools.invoke(messages)
+    # Apply hierarchical context compaction (sliding window + running summary)
+    compacted_messages = compact_messages_window(messages, max_recent=8)
+    response = llm_with_tools.invoke(compacted_messages)
     return {"messages": [response]}
+
 
 def grade_retrieval_node(state: AgentState):
     """

@@ -24,6 +24,11 @@ from src.rag.vectorstore import (
     clear_vectorstore,
     reindex_all_data
 )
+from src.memory.episodic_memory import (
+    list_all_memories,
+    clear_all_memories,
+    save_memory
+)
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wide")
@@ -79,7 +84,33 @@ with st.sidebar:
 
     st.divider()
 
-    # 2. Workspace Artifacts Quick Stats
+    # 2. Episodic Long-Term Memory Manager
+    st.subheader("🧠 Long-Term Memory")
+    memories = list_all_memories()
+    st.caption(f"**{len(memories)} fact(s)** stored in vector memory.")
+    
+    if memories:
+        with st.expander("🔍 View Stored Memories", expanded=False):
+            for m in memories:
+                st.markdown(f"- `[{m['category'].upper()}]` {m['fact']}")
+                
+    with st.expander("➕ Store New Memory Fact", expanded=False):
+        new_fact = st.text_input("Memory Fact:", key="new_mem_fact")
+        new_cat = st.selectbox("Category:", ["preference", "project_rule", "architecture", "general"], key="new_mem_cat")
+        if st.button("💾 Save to Memory", use_container_width=True):
+            if new_fact.strip():
+                save_memory(new_fact.strip(), new_cat)
+                st.success("Memory saved!")
+                st.rerun()
+
+    if memories and st.button("🗑️ Clear Episodic Memory", use_container_width=True, type="secondary"):
+        clear_all_memories()
+        st.warning("All long-term memories cleared.")
+        st.rerun()
+
+    st.divider()
+
+    # 3. Workspace Artifacts Quick Stats
     st.subheader("📁 Sandbox Status")
     workspace_files = list_workspace_files()
     if workspace_files:
@@ -94,12 +125,13 @@ with st.sidebar:
 
     st.divider()
     
-    # 3. Chat Controls
+    # 4. Chat Controls
     st.subheader("💬 Chat Controls")
     if st.button("🗑️ Clear Chat History", use_container_width=True, type="secondary"):
         st.session_state.messages = []
         st.success("Chat history cleared.")
         st.rerun()
+
 
 # --- Main App Header ---
 st.title("🤖 Local Agentic RAG Portfolio Project")
