@@ -131,84 +131,97 @@ if prompt := st.chat_input("Ask a question, request data analysis, web research,
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Display assistant response with Live Observability
+    # Display assistant response with Live Observability & Token Streaming
     with st.chat_message("assistant"):
         final_response = ""
         tool_steps = []
+        registered_calls = set()
         
-        with st.status("🤖 Agent is analyzing & executing...", expanded=True) as status:
-            try:
-                # Format messages for LangGraph
-                formatted_messages = []
-                for msg in st.session_state.messages:
-                    if msg["role"] == "user":
-                        formatted_messages.append(HumanMessage(content=msg["content"]))
-                    elif msg["role"] == "assistant":
-                        formatted_messages.append(AIMessage(content=msg["content"]))
+        status_box = st.status("🤖 Agent is analyzing & executing...", expanded=True)
+        response_placeholder = st.empty()
+        status_closed = False
+        
+        try:
+            # Format messages for LangGraph
+            formatted_messages = []
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    formatted_messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    formatted_messages.append(AIMessage(content=msg["content"]))
+            
+            inputs = {"messages": formatted_messages}
+            
+            # Stream token and tool events from LangGraph
+            for chunk, meta in agent_app.stream(inputs, stream_mode="messages"):
+                node_name = meta.get("langgraph_node", "")
                 
-                inputs = {"messages": formatted_messages}
-                
-                # Stream events from LangGraph
-                for event in agent_app.stream(inputs, stream_mode="updates"):
-                    for node_name, node_output in event.items():
-                        if node_name == "agent":
-                            messages = node_output.get("messages", [])
-                            for msg in messages:
-                                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                                    for tc in msg.tool_calls:
-                                        tool_name = tc.get("name", "tool")
-                                        tool_args = tc.get("args", {})
-                                        st.markdown(f"🧠 **Model decided to use:** `{tool_name}`")
-                                        with st.expander(f"📥 Input to `{tool_name}`", expanded=False):
-                                            st.json(tool_args)
-                                        tool_steps.append({
-                                            "type": "call",
-                                            "tool": tool_name,
-                                            "args": tool_args
-                                        })
-                                elif getattr(msg, "content", None):
-                                    final_response = msg.content
-                                    
-                        elif node_name == "action":
-                            messages = node_output.get("messages", [])
-                            for msg in messages:
-                                tool_name = getattr(msg, "name", "tool")
-                                tool_content = getattr(msg, "content", "")
-                                st.markdown(f"🛠️ **Tool Executed:** `{tool_name}`")
-                                with st.expander(f"📤 Output from `{tool_name}`", expanded=False):
-                                    st.code(tool_content if len(tool_content) <= 1500 else tool_content[:1500] + "\n...[truncated for display]")
+                if node_name == "agent":
+                    # 1. Handle tool invocations
+                    if hasattr(chunk, "tool_calls") and chunk.tool_calls:
+                        for tc in chunk.tool_calls:
+                            call_id = tc.get("id") or str(tc)
+                            if call_id not in registered_calls:
+                                registered_calls.add(call_id)
+                                tool_name = tc.get("name", "tool")
+                                tool_args = tc.get("args", {})
+                                with status_box:
+                                    st.markdown(f"🧠 **Model decided to use:** `{tool_name}`")
+                                    with st.expander(f"📥 Input to `{tool_name}`", expanded=False):
+                                        st.json(tool_args)
                                 tool_steps.append({
-                                    "type": "result",
+                                    "type": "call",
                                     "tool": tool_name,
-                                    "output": tool_content[:1000]
+                                    "args": tool_args
                                 })
-                                
-                        elif node_name == "grade_retrieval":
-                            messages = node_output.get("messages", [])
-                            for msg in messages:
-                                content = getattr(msg, "content", "")
-                                if "High Confidence Match" in content:
-                                    st.markdown("🎯 **CRAG Grader:** `Verified local documents as relevant & grounded.`")
-                                elif "Low Local Document Relevance" in content:
-                                    st.markdown("⚠️ **CRAG Grader:** `Low relevance score. Guiding agent to avoid hallucination.`")
+                    # 2. Handle token-by-token streaming
+                    elif getattr(chunk, "content", None):
+                        if not status_closed and len(tool_steps) > 0:
+                            status_box.update(label="✅ Tools executed. Streaming final answer...", state="complete", expanded=False)
+                            status_closed = True
+                        token = chunk.content
+                        final_response += token
+                        response_placeholder.markdown(final_response + "▌")
+                        
+                elif node_name == "action":
+                    if isinstance(chunk, ToolMessage):
+                        tool_name = getattr(chunk, "name", "tool")
+                        tool_content = getattr(chunk, "content", "")
+                        with status_box:
+                            st.markdown(f"🛠️ **Tool Executed:** `{tool_name}`")
+                            with st.expander(f"📤 Output from `{tool_name}`", expanded=False):
+                                st.code(tool_content if len(tool_content) <= 1500 else tool_content[:1500] + "\n...[truncated for display]")
+                        tool_steps.append({
+                            "type": "result",
+                            "tool": tool_name,
+                            "output": tool_content[:1000]
+                        })
+                        
+                elif node_name == "grade_retrieval":
+                    if isinstance(chunk, ToolMessage):
+                        content = getattr(chunk, "content", "")
+                        with status_box:
+                            if "High Confidence Match" in content:
+                                st.markdown("🎯 **CRAG Grader:** `Verified local documents as relevant & grounded.`")
+                            elif "Low Local Document Relevance" in content:
+                                st.markdown("⚠️ **CRAG Grader:** `Low relevance score. Guiding agent to avoid hallucination.`")
 
+            if not status_closed:
+                status_box.update(label="✅ Agent finished reasoning and executing", state="complete", expanded=False)
                 
-                status.update(label="✅ Agent finished reasoning and executing tools", state="complete", expanded=False)
+            if final_response:
+                response_placeholder.markdown(final_response)
+            else:
+                st.warning("Agent completed execution without generating a textual response.")
                 
-                if final_response:
-                    st.markdown(final_response)
-                else:
-                    st.warning("Agent completed execution without generating a textual response.")
-                    
-                # Add assistant response with recorded steps to chat history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": final_response,
-                    "steps": tool_steps
-                })
-                
-            except Exception as e:
-                status.update(label="❌ Error occurred during agent execution", state="error", expanded=True)
-                st.error(f"Error running agent: {e}")
-                st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
-
+            # Add assistant response with recorded steps to chat history
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": final_response,
+                "steps": tool_steps
+            })
+            
+        except Exception as e:
+            status_box.update(label="❌ Error occurred during execution", state="error", expanded=True)
+            st.error(f"Error during agent execution: {str(e)}")
+            st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
