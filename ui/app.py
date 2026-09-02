@@ -7,18 +7,68 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from src.agent.graph import app as agent_app, LLM_MODEL, LLM_BASE_URL
 from src.tools.coding_tools import list_workspace_files, clean_workspace, WORKSPACE_DIR
+from src.rag.vectorstore import (
+    save_and_ingest_uploaded_files,
+    get_knowledge_base_stats,
+    clear_vectorstore,
+    reindex_all_data
+)
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wide")
 
 # --- Sidebar: Workspace & Artifacts Controls ---
 with st.sidebar:
-    st.header("⚙️ Agent & Workspace Controls")
+    st.header("⚙️ Agent & Knowledge Base")
     
     st.markdown(f"**🤖 Model:** `{LLM_MODEL}`")
     st.markdown(f"**🔗 Endpoint:** `{LLM_BASE_URL}`")
     st.divider()
     
+    # 1. Document Upload & Knowledge Base Management
+    st.subheader("📚 Knowledge Base Manager")
+    kb_stats = get_knowledge_base_stats()
+    col_k1, col_k2 = st.columns(2)
+    col_k1.metric("Indexed Docs", kb_stats["total_files"])
+    col_k2.metric("Chroma Chunks", kb_stats["total_chunks"])
+    
+    with st.expander("📤 Upload & Ingest Documents", expanded=False):
+        uploaded_files = st.file_uploader(
+            "Upload documents",
+            type=["pdf", "txt", "md", "csv", "json", "py"],
+            accept_multiple_files=True,
+            key="kb_uploader"
+        )
+        if uploaded_files:
+            if st.button("📥 Index Uploaded Files", use_container_width=True, type="primary"):
+                with st.spinner("Embedding and adding to ChromaDB..."):
+                    res = save_and_ingest_uploaded_files(uploaded_files)
+                    if res.get("success"):
+                        st.success(f"Indexed {res['total_documents']} document(s) into {res['chunks']} chunks!")
+                        st.rerun()
+                    else:
+                        st.error(res.get("message", "Ingestion failed."))
+
+    if kb_stats["files"]:
+        with st.expander("📄 View Knowledge Base Files", expanded=False):
+            for f in kb_stats["files"]:
+                st.caption(f"• `{f}`")
+
+    col_reindex, col_clear_kb = st.columns(2)
+    if col_reindex.button("🔄 Re-Index", use_container_width=True):
+        with st.spinner("Rebuilding ChromaDB..."):
+            cnt = reindex_all_data()
+            st.success(f"Re-indexed {cnt} chunks.")
+            st.rerun()
+
+    if col_clear_kb.button("🗑️ Wipe DB", use_container_width=True):
+        clear_vectorstore()
+        st.warning("Knowledge Base wiped.")
+        st.rerun()
+
+    st.divider()
+
+    # 2. Workspace Artifacts
     st.subheader("📁 Workspace Artifacts")
     workspace_files = list_workspace_files()
     if workspace_files:
@@ -36,6 +86,7 @@ with st.sidebar:
 
     st.divider()
     
+    # 3. Chat Controls
     st.subheader("💬 Chat Controls")
     if st.button("🗑️ Clear Chat History", use_container_width=True, type="secondary"):
         st.session_state.messages = []
