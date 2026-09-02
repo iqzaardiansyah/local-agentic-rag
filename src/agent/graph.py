@@ -16,7 +16,7 @@ from src.tools.web_scraper import read_webpage
 load_dotenv()
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.6:latest")
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.8:27b")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
 
 # 1. Define Agent State
@@ -52,21 +52,33 @@ tools = [
 ]
 tool_node = ToolNode(tools)
 
-# 3. Initialize LLM
+# 3. Initialize LLM with xhigh thinking / reasoning mode
 # We use ChatOpenAI because Ollama supports OpenAI API format.
-# This allows us to use ngrok URLs seamlessly.
+# extra_body passes reasoning_effort and thinking parameters down to Ollama/vLLM endpoints.
 llm = ChatOpenAI(
     model=LLM_MODEL,
     base_url=LLM_BASE_URL,
     api_key=LLM_API_KEY,
-    temperature=0.2,
+    temperature=0.6,
+    model_kwargs={
+        "extra_body": {
+            "reasoning_effort": "xhigh",
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 32768
+            }
+        }
+    }
 )
 
 # Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
 SYSTEM_PROMPT = """You are OmniLocal-Agent, an advanced, locally-hosted AI assistant.
-Your goal is to help the user by utilizing the tools at your disposal.
+Your goal is to help the user by utilizing the tools at your disposal and thinking through problems deeply and step-by-step.
+Before choosing an action or generating the final response, thoroughly think, analyze multiple hypotheses, and verify facts.
+
+Tool Usage Guide:
 - Use `search_local_documents` for general knowledge or checking user files.
 - Use `query_employee_database` to look up staff, departments, and salaries.
 - Use `web_search` to find up-to-date information, news, or general facts from the internet.
