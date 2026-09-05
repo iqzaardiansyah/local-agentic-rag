@@ -154,6 +154,12 @@ def agent_node(state: AgentState):
         
     # Apply hierarchical context compaction (sliding window + running summary)
     compacted_messages = compact_messages_window(messages, max_recent=8)
+    
+    # Guard to prevent "no user query found in messages" errors in Qwen/Ollama chat templates
+    has_user = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in compacted_messages)
+    if not has_user:
+        compacted_messages.append(HumanMessage(content="Please proceed with the task."))
+        
     response = llm_with_tools.invoke(compacted_messages)
     return {"messages": [response]}
 

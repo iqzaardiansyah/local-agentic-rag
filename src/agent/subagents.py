@@ -89,6 +89,12 @@ def create_subagent_runner(role: str):
         messages = list(state["messages"])
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=system_prompt)] + messages
+            
+        # Ensure at least one HumanMessage is present
+        has_user = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in messages)
+        if not has_user:
+            messages.append(HumanMessage(content="Please execute the assigned task."))
+            
         response = bound_llm.invoke(messages)
         return {"messages": [response]}
         
@@ -109,7 +115,9 @@ def create_subagent_runner(role: str):
 def execute_single_subagent(subtask: Dict[str, str]) -> Dict[str, Any]:
     """Execute a single subagent task to completion."""
     role = subtask.get("role", "custom").lower()
-    task = subtask.get("task", "")
+    task = (subtask.get("task") or "").strip()
+    if not task:
+        task = f"Execute subagent objective for role '{role}'."
     subagent_name = subtask.get("name") or f"{role.capitalize()}-Agent"
     
     try:
