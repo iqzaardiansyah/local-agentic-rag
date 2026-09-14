@@ -220,6 +220,18 @@ flowchart TD
 - `src/eval/auto_eval_set.py` derives cases from headings / sentences / keywords in `data/` files.
 - Merge-safe with hand-written cases; CLI: `python -m src.eval.rag_eval --generate` or `--generate-only`.
 - Sidebar buttons to generate cases and run Hit@3 / MRR.
+
+### 26. ⏱️ Turn Metrics (wall / TTFT / tok/s / tool latency)
+- `TurnMetrics` in the runner records wall time, time-to-first-token, token rate, and per-tool latency.
+- Caption under each assistant reply + `metrics` on `/chat` and `done` SSE events.
+
+### 27. 🗄️ Local Web Search Cache
+- SQLite TTL cache (`data/web_search_cache.db`, default 6h) for `web_search` and subagent search.
+- `GET/DELETE /cache/websearch` for stats and clear.
+
+### 28. 🔀 Fork Session & 🔄 Regenerate Reply
+- Fork: copy history up to any message into a new session (`fork_session`).
+- Regenerate: delete the last assistant reply and re-run the last user message with full multi-turn context.
 ---
 
 ## 📁 Repository Structure
@@ -236,6 +248,7 @@ local-agentic-rag/
 │   ├── agent/
 │   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
 │   │   ├── health.py          # Local LLM endpoint health probe
+│   │   ├── metrics.py         # Turn metrics (TTFT, tok/s, tool latency)
 │   │   ├── runner.py          # Shared event-stream runner (UI + API + SSE)
 │   │   ├── subagent_events.py # Thread-safe parallel-subagent progress bus
 │   │   └── subagents.py       # Parallel subagent factory & dispatch engine
@@ -265,7 +278,8 @@ local-agentic-rag/
 │       ├── git_tools.py       # Local git status/log/diff tools
 │       ├── graph_tool.py      # Knowledge graph multi-hop query tool
 │       ├── mcp_tool.py        # MCP client tools (tables, describe, query)
-│       ├── rag_tool.py        # 2-stage hybrid search tool
+│       ├── rag_tool.py        # Hybrid search tool (BM25 + dense + GraphRAG)
+│       ├── web_cache.py       # Local TTL cache for web_search results
 │       └── web_scraper.py     # DuckDuckGo web search & HTML scraper
 ├── ui/
 │   ├── app.py                 # Streamlit chat & interactive workbench UI

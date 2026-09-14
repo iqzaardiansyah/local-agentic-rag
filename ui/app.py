@@ -37,6 +37,7 @@ from src.memory.session_context import build_agent_messages
 from src.memory.auto_memory import maybe_autocapture_preferences
 from src.rag.citations import get_citations, clear_citations
 from src.agent.runner import run_agent_stream
+from src.agent.metrics import format_metrics
 from citation_view import render_citations
 
 st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wide")
@@ -330,6 +331,173 @@ with st.sidebar:
 # --- Main App Header ---
 st.title("🤖 Local Agentic RAG Portfolio Project")
 
+
+def _run_agent_turn_ui(prompt: str) -> None:
+    """Stream one agent turn into the chat UI (shared by send + regenerate)."""
+    final_response = ""
+    tool_steps = []
+    clear_citations()
+    last_metrics = {}
+
+    status_box = st.status("🤖 Agent is analyzing & executing...", expanded=True)
+    response_placeholder = st.empty()
+    status_closed = False
+
+    try:
+        hh = st.session_state.get("llm_health") or {}
+        if not hh.get("ok"):
+            st.warning(
+                "LLM endpoint looks offline. The agent may fail. "
+                "Check Ollama / ngrok in the sidebar (↻)."
+            )
+
+        agent_messages = build_agent_messages(
+            prompt,
+            session_id=st.session_state.active_session_id,
+            include_cross_session=True,
+        )
+
+        for event in run_agent_stream(
+            prompt,
+            session_id=st.session_state.active_session_id,
+            history=agent_messages,
+        ):
+            etype = event.get("type")
+
+            if etype == "meta":
+                with status_box:
+                    st.caption(
+                        f"Context: {event.get('message_count', 0)} messages · "
+                        f"session `{(event.get('session_id') or '')[:8]}`"
+                    )
+
+            elif etype == "tool_call":
+                tool_name = event.get("tool", "tool")
+                tool_args = event.get("args", {})
+                with status_box:
+                    st.markdown(f"🧠 **Model decided to use:** `{tool_name}`")
+                    with st.expander(f"📥 Input to `{tool_name}`", expanded=False):
+                        st.json(tool_args)
+                tool_steps.append({"type": "call", "tool": tool_name, "args": tool_args})
+
+            elif etype == "token":
+                if not status_closed and len(tool_steps) > 0:
+                    status_box.update(
+                        label="✅ Tools executed. Streaming final answer...",
+                        state="complete",
+                        expanded=False,
+                    )
+                    status_closed = True
+                final_response += event.get("token", "")
+                response_placeholder.markdown(final_response + "▌")
+
+            elif etype == "tool_result":
+                tool_name = event.get("tool", "tool")
+                tool_content = event.get("output", "") or ""
+                with status_box:
+                    st.markdown(f"🛠️ **Tool Executed:** `{tool_name}`")
+                    with st.expander(f"📤 Output from `{tool_name}`", expanded=False):
+                        st.code(
+                            tool_content if len(tool_content) <= 1500
+                            else tool_content[:1500] + "\n...[truncated for display]"
+                        )
+                tool_steps.append({
+                    "type": "result",
+                    "tool": tool_name,
+                    "output": tool_content[:1000]
+                })
+
+            elif etype == "grade":
+                label = event.get("label", "")
+                detail = event.get("detail", "")
+                with status_box:
+                    if label.startswith("crag_high"):
+                        st.markdown(f"🎯 **CRAG Grader:** `{detail}`")
+                    elif label.startswith("crag_low"):
+                        st.markdown(f"⚠️ **CRAG Grader:** `{detail}`")
+                    elif label.startswith("reflexion"):
+                        st.markdown(f"🔧 **Reflexion:** `{detail}`")
+
+            elif etype == "subagent_start":
+                with status_box:
+                    st.markdown(
+                        f"⚡ **Subagent started:** `{event.get('name')}` "
+                        f"({event.get('role')}) · {event.get('index', 0)+1}/{event.get('total', '?')}"
+                    )
+                    st.caption(event.get("task", "")[:180])
+
+            elif etype == "subagent_done":
+                status = event.get("status", "")
+                icon = "✅" if status == "success" else "❌"
+                with status_box:
+                    st.markdown(
+                        f"{icon} **Subagent finished:** `{event.get('name')}` "
+                        f"({status}) · {event.get('elapsed_ms', '?')} ms"
+                    )
+                    st.caption(event.get("result_preview", "")[:200])
+
+            elif etype == "subagents_all_done":
+                with status_box:
+                    st.markdown(
+                        f"⚡ **Parallel fan-out complete:** "
+                        f"{event.get('success', 0)} ok / {event.get('error', 0)} error "
+                        f"of {event.get('count', 0)}"
+                    )
+
+            elif etype == "error":
+                last_metrics = event.get("metrics") or {}
+                status_box.update(
+                    label="❌ Error occurred during execution",
+                    state="error",
+                    expanded=True,
+                )
+                st.error(f"Error during agent execution: {event.get('error')}")
+                st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
+                final_response = final_response or f"Error: {event.get('error')}"
+                break
+
+            elif etype == "done":
+                last_metrics = event.get("metrics") or {}
+
+        if not status_closed:
+            status_box.update(
+                label="✅ Agent finished reasoning and executing",
+                state="complete",
+                expanded=False,
+            )
+
+        citations = get_citations()
+        if final_response:
+            response_placeholder.markdown(final_response)
+        else:
+            st.warning("Agent completed execution without generating a textual response.")
+
+        if last_metrics:
+            st.caption("⏱️ " + format_metrics(last_metrics))
+
+        render_citations(citations, key_prefix="live", expanded=bool(citations))
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": final_response,
+            "steps": tool_steps,
+            "citations": citations,
+            "metrics": last_metrics,
+        })
+        chat_sessions.save_message(
+            st.session_state.active_session_id,
+            "assistant",
+            final_response,
+            steps=tool_steps,
+            citations=citations,
+        )
+
+    except Exception as e:
+        status_box.update(label="❌ Error occurred during execution", state="error", expanded=True)
+        st.error(f"Error during agent execution: {str(e)}")
+        st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
+
+
 tab_chat, tab_workbench = st.tabs([
     "💬 Agent Chat & Live Observability",
     "🛠️ Interactive Artifact & Code Diff Workbench"
@@ -351,8 +519,14 @@ with tab_chat:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages with step history and clickable citations
+    # Regenerate pending (set by button; runs after history render)
+    regenerate_prompt = st.session_state.pop("regenerate_prompt", None)
+
+    # Display chat messages with step history, metrics, fork, and citations
+    last_assistant_idx = None
     for msg_idx, message in enumerate(st.session_state.messages):
+        if message["role"] == "assistant":
+            last_assistant_idx = msg_idx
         with st.chat_message(message["role"]):
             if "steps" in message and message["steps"]:
                 with st.expander("🔍 View Agent Thought Trace & Tool History", expanded=False):
@@ -364,12 +538,59 @@ with tab_chat:
                             st.markdown(f"🛠️ **Tool Result:** `{step['tool']}`")
                             st.code(step.get("output", "")[:1000])
             st.markdown(message["content"])
+            if message.get("metrics"):
+                st.caption("⏱️ " + format_metrics(message["metrics"]))
             if message.get("citations"):
                 render_citations(
                     message["citations"],
                     key_prefix=f"hist_{msg_idx}",
                     expanded=False,
                 )
+
+            col_a, col_b = st.columns([1, 1])
+            msg_db_id = message.get("id")
+            with col_a:
+                if msg_db_id is not None and st.button(
+                    "🔀 Fork here",
+                    key=f"fork_{msg_idx}_{msg_db_id}",
+                    help="Create a new session with history up to this message",
+                ):
+                    forked = chat_sessions.fork_session(
+                        st.session_state.active_session_id,
+                        up_to_message_id=msg_db_id,
+                    )
+                    st.session_state.active_session_id = forked["id"]
+                    st.session_state.messages = chat_sessions.load_messages(forked["id"])
+                    st.success(f"Forked to `{forked['title']}` ({forked['message_count']} messages).")
+                    st.rerun()
+            with col_b:
+                if (
+                    message["role"] == "assistant"
+                    and msg_idx == last_assistant_idx
+                    and st.button(
+                        "🔄 Regenerate",
+                        key=f"regen_{msg_idx}",
+                        help="Delete this reply and re-run the last user message",
+                    )
+                ):
+                    chat_sessions.delete_last_assistant_reply(
+                        st.session_state.active_session_id
+                    )
+                    last_user = chat_sessions.last_user_message(
+                        st.session_state.active_session_id
+                    )
+                    st.session_state.messages = chat_sessions.load_messages(
+                        st.session_state.active_session_id
+                    )
+                    if last_user:
+                        st.session_state.regenerate_prompt = last_user
+                    st.rerun()
+
+    # Handle regenerate (user message already in history; do not save user again)
+    if regenerate_prompt:
+        with st.chat_message("assistant"):
+            _run_agent_turn_ui(regenerate_prompt)
+        st.rerun()
 
     # Accept user input
     if prompt := st.chat_input("Ask a question, request data analysis, web research, or code execution..."):
@@ -393,165 +614,7 @@ with tab_chat:
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            final_response = ""
-            tool_steps = []
-            clear_citations()
-
-            status_box = st.status("🤖 Agent is analyzing & executing...", expanded=True)
-            response_placeholder = st.empty()
-            status_closed = False
-
-            try:
-                # Fail fast if the LLM endpoint is down (still allow the attempt).
-                hh = st.session_state.get("llm_health") or {}
-                if not hh.get("ok"):
-                    st.warning(
-                        "LLM endpoint looks offline. The agent may fail. "
-                        "Check Ollama / ngrok in the sidebar (↻)."
-                    )
-
-                # Session-aware multi-turn: history + cross-session brief + episodic recall
-                agent_messages = build_agent_messages(
-                    prompt,
-                    session_id=st.session_state.active_session_id,
-                    include_cross_session=True,
-                )
-
-                for event in run_agent_stream(
-                    prompt,
-                    session_id=st.session_state.active_session_id,
-                    history=agent_messages,
-                ):
-                    etype = event.get("type")
-
-                    if etype == "meta":
-                        with status_box:
-                            st.caption(
-                                f"Context: {event.get('message_count', 0)} messages · "
-                                f"session `{(event.get('session_id') or '')[:8]}`"
-                            )
-
-                    elif etype == "tool_call":
-                        tool_name = event.get("tool", "tool")
-                        tool_args = event.get("args", {})
-                        with status_box:
-                            st.markdown(f"🧠 **Model decided to use:** `{tool_name}`")
-                            with st.expander(f"📥 Input to `{tool_name}`", expanded=False):
-                                st.json(tool_args)
-                        tool_steps.append({
-                            "type": "call",
-                            "tool": tool_name,
-                            "args": tool_args
-                        })
-
-                    elif etype == "token":
-                        if not status_closed and len(tool_steps) > 0:
-                            status_box.update(
-                                label="✅ Tools executed. Streaming final answer...",
-                                state="complete",
-                                expanded=False,
-                            )
-                            status_closed = True
-                        final_response += event.get("token", "")
-                        response_placeholder.markdown(final_response + "▌")
-
-                    elif etype == "tool_result":
-                        tool_name = event.get("tool", "tool")
-                        tool_content = event.get("output", "") or ""
-                        with status_box:
-                            st.markdown(f"🛠️ **Tool Executed:** `{tool_name}`")
-                            with st.expander(f"📤 Output from `{tool_name}`", expanded=False):
-                                st.code(
-                                    tool_content if len(tool_content) <= 1500
-                                    else tool_content[:1500] + "\n...[truncated for display]"
-                                )
-                        tool_steps.append({
-                            "type": "result",
-                            "tool": tool_name,
-                            "output": tool_content[:1000]
-                        })
-
-                    elif etype == "grade":
-                        label = event.get("label", "")
-                        detail = event.get("detail", "")
-                        with status_box:
-                            if label.startswith("crag_high"):
-                                st.markdown(f"🎯 **CRAG Grader:** `{detail}`")
-                            elif label.startswith("crag_low"):
-                                st.markdown(f"⚠️ **CRAG Grader:** `{detail}`")
-                            elif label.startswith("reflexion"):
-                                st.markdown(f"🔧 **Reflexion:** `{detail}`")
-
-                    elif etype == "subagent_start":
-                        with status_box:
-                            st.markdown(
-                                f"⚡ **Subagent started:** `{event.get('name')}` "
-                                f"({event.get('role')}) · {event.get('index', 0)+1}/{event.get('total', '?')}"
-                            )
-                            st.caption(event.get("task", "")[:180])
-
-                    elif etype == "subagent_done":
-                        status = event.get("status", "")
-                        icon = "✅" if status == "success" else "❌"
-                        with status_box:
-                            st.markdown(
-                                f"{icon} **Subagent finished:** `{event.get('name')}` "
-                                f"({status}) · {event.get('elapsed_ms', '?')} ms"
-                            )
-                            st.caption(event.get("result_preview", "")[:200])
-
-                    elif etype == "subagents_all_done":
-                        with status_box:
-                            st.markdown(
-                                f"⚡ **Parallel fan-out complete:** "
-                                f"{event.get('success', 0)} ok / {event.get('error', 0)} error "
-                                f"of {event.get('count', 0)}"
-                            )
-
-                    elif etype == "error":
-                        status_box.update(
-                            label="❌ Error occurred during execution",
-                            state="error",
-                            expanded=True,
-                        )
-                        st.error(f"Error during agent execution: {event.get('error')}")
-                        st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
-                        final_response = final_response or f"Error: {event.get('error')}"
-                        break
-
-                if not status_closed:
-                    status_box.update(
-                        label="✅ Agent finished reasoning and executing",
-                        state="complete",
-                        expanded=False,
-                    )
-
-                citations = get_citations()
-                if final_response:
-                    response_placeholder.markdown(final_response)
-                else:
-                    st.warning("Agent completed execution without generating a textual response.")
-
-                render_citations(citations, key_prefix="live", expanded=bool(citations))
-
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": final_response,
-                    "steps": tool_steps,
-                    "citations": citations,
-                })
-                chat_sessions.save_message(
-                    st.session_state.active_session_id,
-                    "assistant",
-                    final_response,
-                    steps=tool_steps,
-                    citations=citations,
-                )
-
-            except Exception as e:
-                status_box.update(label="❌ Error occurred during execution", state="error", expanded=True)
-                st.error(f"Error during agent execution: {str(e)}")
-                st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
+            _run_agent_turn_ui(prompt)
 
 # =========================================================================
 # TAB 2: INTERACTIVE ARTIFACT & CODE DIFF WORKBENCH

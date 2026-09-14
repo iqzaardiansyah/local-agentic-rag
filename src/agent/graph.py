@@ -61,18 +61,31 @@ class AgentState(TypedDict):
 
 from langchain_core.tools import tool
 from duckduckgo_search import DDGS
+from src.tools.web_cache import (
+    get_cached_search,
+    put_cached_search,
+    format_results,
+)
 
 @tool
 def web_search(query: str) -> str:
-    """Search the web for up-to-date information, news, or general facts from the internet."""
+    """
+    Search the web for up-to-date information, news, or general facts from the internet.
+    Results are cached locally for several hours to avoid repeat DuckDuckGo calls.
+    """
     try:
+        cached = get_cached_search(query)
+        if cached is not None:
+            return (
+                f"[web_search cache hit for query: {query}]\n\n"
+                + format_results(cached)
+            )
         results = DDGS().text(query, max_results=5)
         if not results:
             return "No results found."
-        formatted_results = []
-        for r in results:
-            formatted_results.append(f"Title: {r.get('title', '')}\nLink: {r.get('href', '')}\nSnippet: {r.get('body', '')}")
-        return "\n\n".join(formatted_results)
+        results = list(results)
+        put_cached_search(query, results)
+        return format_results(results)
     except Exception as e:
         return f"Error during web search: {e}"
 

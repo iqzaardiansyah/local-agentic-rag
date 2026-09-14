@@ -35,12 +35,23 @@ from duckduckgo_search import DDGS
 
 @tool
 def subagent_web_search(query: str) -> str:
-    """Search the web for up-to-date facts and articles."""
+    """Search the web for up-to-date facts and articles (with local result cache)."""
     try:
+        from src.tools.web_cache import (
+            get_cached_search,
+            put_cached_search,
+            format_results,
+        )
+
+        cached = get_cached_search(query)
+        if cached is not None:
+            return format_results(cached)
         results = DDGS().text(query, max_results=4)
         if not results:
             return "No web results found."
-        return "\n\n".join([f"Title: {r.get('title')}\nSnippet: {r.get('body')}" for r in results])
+        results = list(results)
+        put_cached_search(query, results)
+        return format_results(results)
     except Exception as e:
         return f"Web search error: {e}"
 

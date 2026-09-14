@@ -73,6 +73,7 @@ class ChatResponse(BaseModel):
     session_id: Optional[str] = None
     message_count: int = 0
     auto_memory: List[Dict[str, Any]] = Field(default_factory=list)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchRequest(BaseModel):
@@ -116,6 +117,23 @@ def reindex_bm25() -> Dict[str, Any]:
 
     result = rebuild_bm25_index()
     return {"result": result, "status": get_bm25_status()}
+
+
+@app.get("/cache/websearch")
+def websearch_cache_stats() -> Dict[str, Any]:
+    """Local web_search cache stats."""
+    from src.tools.web_cache import cache_stats
+
+    return cache_stats()
+
+
+@app.delete("/cache/websearch")
+def websearch_cache_clear() -> Dict[str, Any]:
+    """Clear the local web_search cache."""
+    from src.tools.web_cache import clear_cache
+
+    cleared = clear_cache()
+    return {"cleared": cleared}
 
 
 def _sse(data: Dict[str, Any], event: Optional[str] = None) -> str:
@@ -230,6 +248,7 @@ def _stream_chat_events(req: ChatRequest) -> Iterator[str]:
                     "session_id": session_id,
                     "message_count": message_count,
                     "auto_memory": auto_saved,
+                    "metrics": event.get("metrics") or {},
                 },
                 event="done",
             )
@@ -309,6 +328,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         session_id=session_id,
         message_count=message_count,
         auto_memory=auto_saved,
+        metrics=final.get("metrics") or {},
     )
 
 

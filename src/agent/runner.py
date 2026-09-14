@@ -15,6 +15,7 @@ from langchain_core.messages import BaseMessage
 
 from src.memory.session_context import build_agent_messages
 from src.rag.citations import clear_citations, get_citations
+from src.agent.metrics import TurnMetrics
 from src.agent.subagent_events import (
     register_subagent_observer,
     unregister_subagent_observer,
@@ -51,6 +52,9 @@ def run_agent_stream(
     tool_steps: List[Dict[str, Any]] = []
     registered_calls: set = set()
     final_response = ""
+    metrics = TurnMetrics()
+    # Map tool_call_id → tool name for latency pairing
+    call_id_to_tool: Dict[str, str] = {}
 
     def _observer(event: Dict[str, Any]) -> None:
         # Called from subagent worker threads.
@@ -92,6 +96,8 @@ def run_agent_stream(
                             registered_calls.add(call_id)
                             tool_name = tc.get("name", "tool")
                             tool_args = tc.get("args", {})
+                            call_id_to_tool[call_id] = tool_name
+                            metrics.mark_tool_call(tool_name, call_id=call_id)
                             tool_steps.append(
                                 {"type": "call", "tool": tool_name, "args": tool_args}
                             )
@@ -103,6 +109,7 @@ def run_agent_stream(
                     elif getattr(chunk, "content", None):
                         token = chunk.content
                         final_response += token
+                        metrics.mark_token(token)
                         out_q.put({"type": "token", "token": token})
 
                 elif node_name == "action":
@@ -111,6 +118,8 @@ def run_agent_stream(
                     if isinstance(chunk, ToolMessage):
                         tool_name = getattr(chunk, "name", "tool")
                         tool_content = getattr(chunk, "content", "") or ""
+                        tool_call_id = getattr(chunk, "tool_call_id", None) or tool_name
+                        metrics.mark_tool_result(tool_name, call_id=tool_call_id)
                         tool_steps.append(
                             {
                                 "type": "result",
@@ -143,10 +152,12 @@ def run_agent_stream(
                 "answer": final_response,
                 "steps": tool_steps,
                 "citations": citations,
+                "metrics": metrics.snapshot(),
             })
 
         except Exception as e:
-            out_q.put({"type": "error", "error": str(e)})
+            snap = metrics.snapshot()
+            out_q.put({"type": "error", "error": str(e), "metrics": snap})
         finally:
             try:
                 unregister_subagent_observer(_observer)
@@ -188,6 +199,7 @@ def run_agent_once(
         "answer": "",
         "steps": [],
         "citations": [],
+        "metrics": {},
     }
     for event in run_agent_stream(user_message, session_id=session_id):
         if event["type"] == "done":

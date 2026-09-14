@@ -111,25 +111,27 @@ def load_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str
     Load messages for a session in chronological order.
 
     limit: if set, return only the most recent N messages (still chronological).
+    Each message includes an integer `id` (DB row id) for fork/truncate ops.
     """
     init_db()
     with _connect() as conn:
         if limit and limit > 0:
             rows = conn.execute(
-                "SELECT role, content, steps, citations, created_at FROM messages "
+                "SELECT id, role, content, steps, citations, created_at FROM messages "
                 "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
                 (session_id, int(limit)),
             ).fetchall()
             rows = list(reversed(rows))
         else:
             rows = conn.execute(
-                "SELECT role, content, steps, citations, created_at FROM messages "
+                "SELECT id, role, content, steps, citations, created_at FROM messages "
                 "WHERE session_id = ? ORDER BY id ASC",
                 (session_id,),
             ).fetchall()
     messages = []
     for r in rows:
         msg = {
+            "id": r["id"],
             "role": r["role"],
             "content": r["content"],
             "created_at": r["created_at"],
@@ -146,6 +148,133 @@ def load_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str
                 msg["citations"] = []
         messages.append(msg)
     return messages
+
+
+def truncate_after_message(session_id: str, message_id: int) -> int:
+    """
+    Delete every message in the session with id >= message_id (inclusive).
+    Used for regenerate (drop the assistant reply) and fork-from-point.
+    Returns number of deleted rows.
+    """
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM messages WHERE session_id = ? AND id >= ?",
+            (session_id, int(message_id)),
+        )
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (_now(), session_id),
+        )
+    return cur.rowcount
+
+
+def delete_last_assistant_reply(session_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Delete the most recent assistant message in a session (for regenerate).
+    Returns the deleted message dict, or None if there was no assistant reply.
+    """
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, role, content, steps, citations, created_at FROM messages "
+            "WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("DELETE FROM messages WHERE id = ?", (row["id"],))
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (_now(), session_id),
+        )
+    deleted = {
+        "id": row["id"],
+        "role": row["role"],
+        "content": row["content"],
+        "created_at": row["created_at"],
+    }
+    if row["steps"]:
+        try:
+            deleted["steps"] = json.loads(row["steps"])
+        except json.JSONDecodeError:
+            deleted["steps"] = []
+    return deleted
+
+
+def last_user_message(session_id: str) -> Optional[str]:
+    """Return the content of the most recent user message, if any."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT content FROM messages WHERE session_id = ? AND role = 'user' "
+            "ORDER BY id DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+    return row["content"] if row else None
+
+
+def fork_session(
+    source_session_id: str,
+    up_to_message_id: Optional[int] = None,
+    title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create a new session containing a copy of messages from source_session_id.
+
+    up_to_message_id: if set, copy only messages with id <= this row id
+                      (exclusive fork-at-point: keep history up to that message).
+    Title defaults to "<original title> (fork)".
+    """
+    init_db()
+    with _connect() as conn:
+        src = conn.execute(
+            "SELECT title FROM sessions WHERE id = ?", (source_session_id,)
+        ).fetchone()
+        if not src:
+            raise ValueError(f"Source session not found: {source_session_id}")
+
+        if up_to_message_id is None:
+            rows = conn.execute(
+                "SELECT role, content, steps, citations, created_at FROM messages "
+                "WHERE session_id = ? ORDER BY id ASC",
+                (source_session_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT role, content, steps, citations, created_at FROM messages "
+                "WHERE session_id = ? AND id <= ? ORDER BY id ASC",
+                (source_session_id, int(up_to_message_id)),
+            ).fetchall()
+
+        fork_id = str(uuid.uuid4())
+        ts = _now()
+        fork_title = (title or f"{src['title']} (fork)")[:120]
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (fork_id, fork_title, ts, ts),
+        )
+        for r in rows:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, steps, citations, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    fork_id,
+                    r["role"],
+                    r["content"],
+                    r["steps"],
+                    r["citations"],
+                    r["created_at"],
+                ),
+            )
+
+    return {
+        "id": fork_id,
+        "title": fork_title,
+        "created_at": ts,
+        "updated_at": ts,
+        "message_count": len(rows),
+    }
 
 
 def save_message(
