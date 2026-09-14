@@ -258,6 +258,15 @@ flowchart TD
 ### 34. 📄 Research Brief Export
 - Question + answer + ranked citations (+ tools/metrics) as Markdown.
 - **Brief** button on assistant messages; sidebar download; API `POST /sessions/{id}/brief`.
+
+### 35. 👀 data/ File-Watch + Auto-Reindex
+- `src/rag/watcher.py` fingerprints file names/sizes/mtimes under `data/`.
+- Sidebar FRESH/STALE badge, **Re-index now**, optional auto-reindex toggle.
+- Fingerprint saved after reindex/upload/URL ingest; API `GET /kb/watch`, `POST /kb/reindex`.
+
+### 36. 📌 Pin / Favorite Sessions
+- Pinned sessions sort to the top of the picker (`pinned` column + migration).
+- **Pin/Unpin session** button; API `POST /sessions/{id}/pin`.
 ---
 
 ## 📁 Repository Structure
@@ -298,6 +307,7 @@ local-agentic-rag/
 │   │   ├── hybrid_search.py   # BM25 + Dense + GraphRAG Reciprocal Rank Fusion
 │   │   ├── ingest_url.py      # Webpage → data/ + Chroma + GraphRAG ingest
 │   │   ├── kb_export.py       # Full knowledge-base Markdown export
+│   │   ├── watcher.py         # data/ fingerprint watch + auto-reindex
 │   │   ├── reranker.py        # Sentence-transformers Cross-Encoder
 │   │   ├── citations.py       # In-process RAG citation store
 │   │   └── graph_rag.py       # NetworkX GraphRAG + regex triple extractor v2
@@ -416,7 +426,10 @@ curl "http://127.0.0.1:8000/sources?name=README.md"
 curl "http://127.0.0.1:8000/sessions/search?q=hybrid"
 curl -X POST http://127.0.0.1:8000/kb/export
 curl http://127.0.0.1:8000/config/validate
+curl http://127.0.0.1:8000/kb/watch
+curl -X POST http://127.0.0.1:8000/kb/reindex
 curl -X POST http://127.0.0.1:8000/sessions/demo-1/brief
+curl -X POST "http://127.0.0.1:8000/sessions/demo-1/pin?pinned=true"
 ```
 
 SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `subagent_start`, `subagent_done`, `subagents_all_done`, `memory_capture`, `done`, `error`.

@@ -174,6 +174,22 @@ def export_kb_content(include_bodies: bool = True) -> Dict[str, Any]:
             pass
 
 
+@app.get("/kb/watch")
+def kb_watch() -> Dict[str, Any]:
+    """Check whether data/ changed since the last index fingerprint."""
+    from src.rag.watcher import check_freshness
+
+    return check_freshness()
+
+
+@app.post("/kb/reindex")
+def kb_reindex(force: bool = False) -> Dict[str, Any]:
+    """Rebuild Chroma+BM25 if data/ is stale (or when force=true)."""
+    from src.rag.watcher import auto_reindex_if_stale
+
+    return auto_reindex_if_stale(force=force)
+
+
 @app.get("/config/validate")
 def config_validate() -> Dict[str, Any]:
     """Validate .env / LLM config without calling the model."""
@@ -182,6 +198,17 @@ def config_validate() -> Dict[str, Any]:
     report = validate_config()
     report["formatted"] = format_config_report(report)
     return report
+
+
+@app.post("/sessions/{session_id}/pin")
+def pin_session(session_id: str, pinned: bool = True) -> Dict[str, Any]:
+    """Pin or unpin a chat session."""
+    from src.memory import chat_sessions
+
+    ok = chat_sessions.set_session_pinned(session_id, pinned=pinned)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"session_id": session_id, "pinned": pinned}
 
 
 @app.post("/sessions/{session_id}/brief")

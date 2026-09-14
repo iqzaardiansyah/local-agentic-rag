@@ -101,6 +101,12 @@ def save_and_ingest_uploaded_files(uploaded_files) -> Dict[str, Any]:
     vectorstore = get_vectorstore()
     vectorstore.add_documents(chunks)
     _notify_kb_changed()
+    try:
+        from src.rag.watcher import mark_indexed
+
+        mark_indexed()
+    except Exception:
+        pass
 
     return {
         "success": True,
@@ -169,6 +175,12 @@ def reindex_all_data() -> int:
     vectorstore = get_vectorstore()
     vectorstore.add_documents(chunks)
     _notify_kb_changed()
+    try:
+        from src.rag.watcher import mark_indexed
+
+        mark_indexed()
+    except Exception:
+        pass
     return len(chunks)
 
 def ingest_documents():

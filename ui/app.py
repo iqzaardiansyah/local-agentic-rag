@@ -27,6 +27,7 @@ from src.rag.vectorstore import (
     reindex_all_data
 )
 from src.rag.hybrid_search import get_bm25_status, rebuild_bm25_index
+from src.rag.watcher import check_freshness, format_freshness, auto_reindex_if_stale
 from src.rag.graph_rag import get_kg_engine
 from src.memory.episodic_memory import (
     list_all_memories,
@@ -210,6 +211,30 @@ with st.sidebar:
         st.warning("Knowledge Base wiped.")
         st.rerun()
 
+    # --- data/ file-watch freshness ---
+    freshness = check_freshness()
+    if freshness.get("fresh"):
+        st.success(format_freshness(freshness))
+    else:
+        st.warning(format_freshness(freshness))
+        if "auto_reindex_on_change" not in st.session_state:
+            st.session_state.auto_reindex_on_change = False
+        st.session_state.auto_reindex_on_change = st.toggle(
+            "⚡ Auto-reindex when data/ changes",
+            value=st.session_state.auto_reindex_on_change,
+            help="On each app load, rebuild Chroma+BM25 if files under data/ changed.",
+        )
+        if st.session_state.auto_reindex_on_change or st.button(
+            "📥 Re-index now (data/ changed)", use_container_width=True, type="primary"
+        ):
+            with st.spinner("Auto-reindexing changed data/ files..."):
+                res = auto_reindex_if_stale(force=not st.session_state.auto_reindex_on_change)
+            if res.get("reindexed"):
+                st.success(f"Re-indexed {res.get('chunks', 0)} chunks.")
+                st.rerun()
+            elif not res.get("error"):
+                st.caption(res.get("reason", ""))
+
     if st.button("📦 Export Knowledge Base (Markdown)", use_container_width=True):
         from src.rag.kb_export import export_knowledge_base_markdown
 
@@ -311,10 +336,14 @@ with st.sidebar:
         st.session_state.messages = chat_sessions.load_messages(st.session_state.active_session_id)
 
     if session_options:
+        # Show pin stars in the picker label
+        pin_map = {s["id"]: bool(s.get("pinned")) for s in all_sessions}
         selected = st.selectbox(
             "Active session",
             options=list(session_options.keys()),
-            format_func=lambda sid: session_options[sid],
+            format_func=lambda sid: (
+                ("📌 " if pin_map.get(sid) else "") + session_options[sid]
+            ),
             index=list(session_options.keys()).index(st.session_state.active_session_id)
             if st.session_state.active_session_id in session_options
             else 0,
@@ -323,6 +352,17 @@ with st.sidebar:
         if selected != st.session_state.active_session_id:
             st.session_state.active_session_id = selected
             st.session_state.messages = chat_sessions.load_messages(selected)
+            st.rerun()
+
+        cur_pinned = pin_map.get(st.session_state.active_session_id, False)
+        if st.button(
+            ("📌 Unpin session" if cur_pinned else "📌 Pin session"),
+            use_container_width=True,
+            help="Pinned sessions sort to the top of the picker",
+        ):
+            chat_sessions.set_session_pinned(
+                st.session_state.active_session_id, pinned=not cur_pinned
+            )
             st.rerun()
 
     col_new, col_del = st.columns(2)

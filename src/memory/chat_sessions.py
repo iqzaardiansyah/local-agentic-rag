@@ -52,6 +52,10 @@ def init_db() -> None:
         if "citations" not in cols:
             conn.execute("ALTER TABLE messages ADD COLUMN citations TEXT")
 
+        session_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
+        if "pinned" not in session_cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -63,19 +67,61 @@ def create_session(title: str = "New Chat") -> Dict[str, Any]:
     ts = _now()
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, 0)",
             (session_id, title[:120], ts, ts),
         )
-    return {"id": session_id, "title": title[:120], "created_at": ts, "updated_at": ts}
+    return {
+        "id": session_id,
+        "title": title[:120],
+        "created_at": ts,
+        "updated_at": ts,
+        "pinned": 0,
+    }
 
 
 def list_sessions() -> List[Dict[str, Any]]:
+    """List sessions: pinned first, then most recently updated."""
     init_db()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+            "SELECT id, title, created_at, updated_at, COALESCE(pinned, 0) AS pinned "
+            "FROM sessions ORDER BY pinned DESC, updated_at DESC"
         ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["pinned"] = bool(d.get("pinned"))
+        out.append(d)
+    return out
+
+
+def set_session_pinned(session_id: str, pinned: bool = True) -> bool:
+    """Pin or unpin a session (favorites rise to the top of the picker)."""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE sessions SET pinned = ? WHERE id = ?",
+            (1 if pinned else 0, session_id),
+        )
+    return cur.rowcount > 0
+
+
+def toggle_session_pinned(session_id: str) -> bool:
+    """Toggle pin state; returns the new pinned value."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(pinned, 0) AS pinned FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return False
+        new_val = 0 if row["pinned"] else 1
+        conn.execute(
+            "UPDATE sessions SET pinned = ? WHERE id = ?",
+            (new_val, session_id),
+        )
+    return bool(new_val)
 
 
 def rename_session(session_id: str, title: str) -> bool:
@@ -251,7 +297,7 @@ def fork_session(
         ts = _now()
         fork_title = (title or f"{src['title']} (fork)")[:120]
         conn.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, 0)",
             (fork_id, fork_title, ts, ts),
         )
         for r in rows:
@@ -387,7 +433,7 @@ def ensure_session(session_id: str, title: str = "API Chat") -> str:
         ).fetchone()
         if not row:
             conn.execute(
-                "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO sessions (id, title, created_at, updated_at, pinned) VALUES (?, ?, ?, ?, 0)",
                 (session_id, title[:120], ts, ts),
             )
     return session_id

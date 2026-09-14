@@ -108,6 +108,13 @@ def ingest_url_to_kb(url: str, max_chars: int = 50000) -> dict:
     except Exception:
         triples = 0
 
+    try:
+        from src.rag.watcher import mark_indexed
+
+        mark_indexed()
+    except Exception:
+        pass
+
     return {
         "success": True,
         "url": url,

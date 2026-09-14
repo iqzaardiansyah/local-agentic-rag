@@ -10,4 +10,5 @@ workspace/
 data/chat_sessions.db
 data/web_search_cache.db
 data/eval_reports/
+data/.index_fingerprint.json
 research_brief_*.md
