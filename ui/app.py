@@ -120,6 +120,56 @@ with st.sidebar:
                     else:
                         st.error(res.get("message", "Ingestion failed."))
 
+    with st.expander("🌐 Ingest URL into Knowledge Base", expanded=False):
+        url_to_ingest = st.text_input(
+            "Page URL",
+            placeholder="https://example.com/docs/page",
+            key="kb_url_input",
+        )
+        if st.button("🌐 Fetch & Index URL", use_container_width=True, type="primary"):
+            if not url_to_ingest.strip():
+                st.warning("Enter a URL first.")
+            else:
+                from src.rag.ingest_url import ingest_url_to_kb
+
+                with st.spinner("Scraping, embedding, extracting triples..."):
+                    try:
+                        res = ingest_url_to_kb(url_to_ingest.strip())
+                    except Exception as e:
+                        res = {"success": False, "message": str(e)}
+                if res.get("success"):
+                    st.success(
+                        f"Indexed `{res.get('title') or res.get('file')}` — "
+                        f"{res.get('chunks')} chunks, {res.get('triples')} triples."
+                    )
+                    st.rerun()
+                else:
+                    st.error(res.get("message", "Ingest failed."))
+
+    with st.expander("🧪 Offline RAG Eval", expanded=False):
+        st.caption("Generate Hit@k cases from files in `data/` (no LLM needed).")
+        col_g1, col_g2 = st.columns(2)
+        if col_g1.button("🧬 Generate eval cases", use_container_width=True):
+            from src.eval.auto_eval_set import write_eval_set
+
+            info = write_eval_set(replace=False)
+            st.success(
+                f"{info['total']} cases in `{info['path']}` "
+                f"({info['generated']} new this run)."
+            )
+        if col_g2.button("📊 Run eval metrics", use_container_width=True):
+            from src.eval.rag_eval import evaluate_all
+
+            with st.spinner("Running hybrid retrieval eval..."):
+                report = evaluate_all(top_k=3)
+            if report.get("n"):
+                st.metric("Hit Rate@3", f"{report['hit_rate_at_k']:.3f}")
+                st.metric("MRR", f"{report['mrr']:.3f}")
+                if report.get("avg_keyword_rate") is not None:
+                    st.metric("Avg keyword", f"{report['avg_keyword_rate']:.3f}")
+            else:
+                st.warning("Eval set empty — generate cases first.")
+
     with st.expander("🕸️ Explore GraphRAG Triples", expanded=False):
         st.markdown("**Top Connected Entity Hubs:**")
         for hub in kg_stats.get("top_hubs", []):

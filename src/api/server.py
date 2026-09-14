@@ -85,6 +85,10 @@ class IngestRequest(BaseModel):
     source_name: str = "api_upload.txt"
 
 
+class IngestUrlRequest(BaseModel):
+    url: str = Field(..., min_length=8, description="http(s) URL to scrape and index")
+
+
 @app.get("/health")
 def health() -> Dict[str, Any]:
     from src.agent.graph import LLM_BASE_URL, LLM_MODEL
@@ -398,6 +402,20 @@ def ingest(req: IngestRequest) -> Dict[str, Any]:
     except Exception:
         pass
     return {"success": True, "source": safe_name, "path": dest, "chunks": len(chunks)}
+
+
+@app.post("/ingest/url")
+def ingest_url(req: IngestUrlRequest) -> Dict[str, Any]:
+    """Scrape a webpage and index it into Chroma + GraphRAG (free, local)."""
+    from src.rag.ingest_url import ingest_url_to_kb
+
+    try:
+        result = ingest_url_to_kb(req.url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ingest failed: {e}") from e
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Ingest failed"))
+    return result
 
 
 @app.get("/sessions")

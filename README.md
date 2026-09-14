@@ -206,6 +206,20 @@ flowchart TD
 - `chat_sessions.search_messages()` does case-insensitive substring search across all sessions.
 - Sidebar “Search all sessions” expander with Open-session jump buttons.
 - `GET /sessions/search?q=...` for API clients.
+
+### 23. 🕸️ GraphRAG Fusion in Hybrid Search & Citations
+- KG subgraph hits become real Documents (`metadata.kind='graphrag'`) with paths to `data/knowledge_graph.json`.
+- Fused with dense + BM25 via the same RRF, then cross-encoder reranked.
+- Citation panel shows GraphRAG sources with entity previews; `query_knowledge_graph` also records citations.
+
+### 24. 🌐 URL → Knowledge Base Ingest
+- `ingest_webpage` tool + `POST /ingest/url` + sidebar “Ingest URL” expander.
+- Scrapes page → saves under `data/` → chunks into Chroma → extracts GraphRAG triples → invalidates BM25.
+
+### 25. 🧬 Auto-Generated RAG Eval Set
+- `src/eval/auto_eval_set.py` derives cases from headings / sentences / keywords in `data/` files.
+- Merge-safe with hand-written cases; CLI: `python -m src.eval.rag_eval --generate` or `--generate-only`.
+- Sidebar buttons to generate cases and run Hit@3 / MRR.
 ---
 
 ## 📁 Repository Structure
@@ -228,6 +242,7 @@ local-agentic-rag/
 │   ├── api/
 │   │   └── server.py          # Free local FastAPI REST API + SSE
 │   ├── eval/
+│   │   ├── auto_eval_set.py   # Auto-generate eval cases from data/
 │   │   └── rag_eval.py        # Offline Hit@k / MRR evaluation harness
 │   ├── memory/
 │   │   ├── auto_memory.py     # Heuristic preference capture → episodic store
@@ -239,7 +254,8 @@ local-agentic-rag/
 │   │   └── mock_data.db       # Relational SQLite database
 │   ├── rag/
 │   │   ├── vectorstore.py     # ChromaDB multi-format document indexer
-│   │   ├── hybrid_search.py   # BM25 + Dense Reciprocal Rank Fusion
+│   │   ├── hybrid_search.py   # BM25 + Dense + GraphRAG Reciprocal Rank Fusion
+│   │   ├── ingest_url.py      # Webpage → data/ + Chroma + GraphRAG ingest
 │   │   ├── reranker.py        # Sentence-transformers Cross-Encoder
 │   │   ├── citations.py       # In-process RAG citation store
 │   │   └── graph_rag.py       # NetworkX GraphRAG knowledge graph engine
@@ -310,8 +326,9 @@ Open `http://localhost:8501` in your browser!
 | Tool Name | Category | Description |
 | :--- | :--- | :--- |
 | **`spawn_parallel_subagents`** | Orchestration | Concurrently runs up to 4 specialized subagents across parallel Ollama GPU slots. |
-| **`search_local_documents`** | Hybrid RAG | 2-stage hybrid retrieval (BM25 + Chroma Dense via RRF) with Cross-Encoder reranking. |
+| **`search_local_documents`** | Hybrid RAG | 2-stage hybrid retrieval (BM25 + Chroma Dense + GraphRAG via RRF) with Cross-Encoder reranking. |
 | **`query_knowledge_graph`** | GraphRAG | Traverses NetworkX knowledge graph for 1-hop and 2-hop relational paths. |
+| **`ingest_webpage`** | Ingest | Scrape a URL into data/ + Chroma + GraphRAG and make it searchable. |
 | **`recall_past_memory`** | Memory | Semantically recalls user preferences and project rules from persistent vector memory. |
 | **`store_episodic_memory`** | Memory | Permanently saves facts and architectural decisions to long-term memory. |
 | **`mcp_list_tables`** | MCP Database | Discovers all SQLite tables and record counts via MCP JSON-RPC 2.0. |
@@ -364,9 +381,11 @@ When `session_id` is set on `/chat` or `/chat/stream`, prior turns in that sessi
 ```bash
 python -m src.eval.rag_eval
 python -m src.eval.rag_eval --top-k 5 --json
+python -m src.eval.auto_eval_set          # generate/merge cases from data/
+python -m src.eval.rag_eval --generate    # generate then evaluate
 ```
 
-Add cases to `data/eval_set.json` as `{"query", "expected_source_substring", "answer_keywords"}`.
+Add cases to `data/eval_set.json` as `{"query", "expected_source_substring", "answer_keywords"}`, or let `--generate` derive them from files in `data/`.
 
 ---
 

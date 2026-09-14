@@ -107,7 +107,29 @@ def main() -> None:
     parser.add_argument("--eval-set", default=None, help="Path to eval_set.json")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--json", action="store_true", help="Print full JSON report")
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="Auto-generate/merge eval cases from data/ before evaluating",
+    )
+    parser.add_argument(
+        "--generate-only",
+        action="store_true",
+        help="Only write auto-generated eval cases; do not run retrieval metrics",
+    )
+    parser.add_argument("--replace", action="store_true", help="With --generate: overwrite eval set")
     args = parser.parse_args()
+
+    if args.generate or args.generate_only:
+        from src.eval.auto_eval_set import write_eval_set
+
+        info = write_eval_set(path=args.eval_set, replace=args.replace)
+        print(
+            f"Eval set: {info['total']} cases at {info['path']} "
+            f"({info['generated']} generated this run)"
+        )
+        if args.generate_only:
+            return
 
     report = evaluate_all(eval_path=args.eval_set, top_k=args.top_k)
     if args.json:

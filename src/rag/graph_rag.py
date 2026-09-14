@@ -220,3 +220,90 @@ def get_kg_engine() -> KnowledgeGraphEngine:
     if _kg_engine is None:
         _kg_engine = KnowledgeGraphEngine()
     return _kg_engine
+
+
+def _format_triple_doc(relations: List[Dict[str, Any]], query: str) -> "Any":
+    """Build a Document-like object from KG relations (lazy import to avoid cycles)."""
+    from langchain_core.documents import Document
+
+    lines = [f"Knowledge Graph context for query: {query}"]
+    for r in relations:
+        lines.append(f"{r['subject']} —[{r['predicate']}]→ {r['object']}")
+    preview_entities = sorted({r["subject"] for r in relations} | {r["object"] for r in relations})
+    return Document(
+        page_content="\n".join(lines),
+        metadata={
+            "source": "knowledge_graph",
+            "path": "data/knowledge_graph.json",
+            "abs_path": GRAPH_DATA_PATH,
+            "kind": "graphrag",
+            "entities": ", ".join(preview_entities[:12]),
+            "relation_count": len(relations),
+            "query": query,
+        },
+    )
+
+
+def graph_documents_for_query(query: str, max_docs: int = 3) -> List[Any]:
+    """
+    Convert Knowledge Graph subgraph hits into Documents for hybrid RRF fusion
+    and the citation panel. Returns [] when the KG has no match for the query.
+
+    Each Document is a structured triple listing, marked metadata.kind='graphrag'
+    so downstream tools can treat it differently from file chunks.
+    """
+    try:
+        kg = get_kg_engine()
+        sub = kg.search_subgraph(query, max_hops=2)
+    except Exception:
+        return []
+    if not sub.get("found"):
+        return []
+
+    direct = sub.get("direct_relations") or []
+    multihop = sub.get("multi_hop_paths") or []
+    matched = sub.get("matched_entities") or []
+    if not direct and not multihop and not matched:
+        return []
+
+    docs = []
+
+    # Doc 1: matched entities summary (always when found)
+    if matched:
+        from langchain_core.documents import Document
+
+        docs.append(
+            Document(
+                page_content=(
+                    f"Knowledge Graph matched entities for '{query}': "
+                    + ", ".join(matched)
+                ),
+                metadata={
+                    "source": "knowledge_graph",
+                    "path": "data/knowledge_graph.json",
+                    "abs_path": GRAPH_DATA_PATH,
+                    "kind": "graphrag",
+                    "entities": ", ".join(matched),
+                    "relation_count": 0,
+                    "query": query,
+                },
+            )
+        )
+
+    # Doc 2: 1-hop triples
+    if direct:
+        docs.append(_format_triple_doc(direct[:12], query))
+
+    # Doc 3: 2-hop paths as synthetic relations
+    if multihop:
+        hop_rels = [
+            {
+                "subject": p["start"],
+                "predicate": f"{p['hop1_predicate']}→{p['hop2_predicate']}",
+                "object": p["end"],
+            }
+            for p in multihop[:8]
+        ]
+        docs.append(_format_triple_doc(hop_rels, query))
+
+    return docs[:max_docs]

@@ -26,6 +26,7 @@ from src.tools.coding_tools import (
     find_files_by_pattern
 )
 from src.tools.web_scraper import read_webpage
+from src.rag.ingest_url import ingest_webpage
 from src.agent.subagents import spawn_parallel_subagents
 from src.memory.episodic_memory import (
     recall_past_memory,
@@ -86,6 +87,7 @@ tools = [
     store_episodic_memory,
     web_search,
     read_webpage,
+    ingest_webpage,
     execute_terminal_command,
     execute_python_code,
     read_local_file,
@@ -153,6 +155,7 @@ Direct Coding & Workspace Tools:
 - Use `search_local_documents` for general knowledge or checking user files in ChromaDB knowledge base.
 - Use `web_search` to find up-to-date information, news, or general facts from the internet.
 - Use `read_webpage` if a search result URL looks highly relevant and you need to read its full content.
+- Use `ingest_webpage` to permanently index a useful URL into the local knowledge base (Chroma + GraphRAG + BM25).
 - Use `list_directory_tree` to visually explore folders and see project structure.
 - Use `grep_search` to search text/regex across codebase files with line numbers.
 - Use `view_code_slice` to inspect specific lines of code without dumping full files.

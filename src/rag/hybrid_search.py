@@ -171,9 +171,20 @@ def reciprocal_rank_fusion(
     return [doc_map[doc_id] for doc_id in sorted_doc_ids[:top_n]]
 
 
-def hybrid_search(query: str, top_k: int = 10) -> List[Document]:
+def hybrid_search(
+    query: str,
+    top_k: int = 10,
+    include_graph: bool = True,
+) -> List[Document]:
     """
-    Performs Hybrid Search combining Chroma Dense Vectors and BM25 Sparse Search via RRF.
+    Performs Hybrid Search combining:
+      1. Chroma Dense Vectors
+      2. BM25 Sparse Search
+      3. Optional GraphRAG Documents (metadata.kind='graphrag')
+    fused via Reciprocal Rank Fusion.
+
+    Graph docs are real Documents so they flow through the same reranker and
+    citation pipeline as file chunks — not a side channel.
     """
     # 1. Dense retrieval (ChromaDB)
     vs = get_vectorstore()
@@ -185,14 +196,22 @@ def hybrid_search(query: str, top_k: int = 10) -> List[Document]:
     # 2. Sparse retrieval (BM25)
     sparse_docs = bm25_search(query, top_k=top_k)
 
-    # 3. If only one retriever has results, return it
-    if not sparse_docs and dense_docs:
-        return dense_docs
-    if not dense_docs and sparse_docs:
-        return sparse_docs
-    if not dense_docs and not sparse_docs:
+    # 3. GraphRAG retrieval (structured triples → Documents)
+    graph_docs: List[Document] = []
+    if include_graph:
+        try:
+            from src.rag.graph_rag import graph_documents_for_query
+
+            graph_docs = graph_documents_for_query(query, max_docs=3)
+        except Exception:
+            graph_docs = []
+
+    ranked_lists = [docs for docs in (dense_docs, sparse_docs, graph_docs) if docs]
+    if not ranked_lists:
         return []
+    if len(ranked_lists) == 1:
+        return ranked_lists[0][:top_k]
 
     # 4. Fuse using Reciprocal Rank Fusion
-    fused_docs = reciprocal_rank_fusion([dense_docs, sparse_docs], k=60, top_n=top_k)
+    fused_docs = reciprocal_rank_fusion(ranked_lists, k=60, top_n=top_k)
     return fused_docs
