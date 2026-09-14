@@ -7,3 +7,5 @@ data/chroma_memory/
 .ipynb_checkpoints/
 *.db
 workspace/
+data/chat_sessions.db
+data/eval_reports/

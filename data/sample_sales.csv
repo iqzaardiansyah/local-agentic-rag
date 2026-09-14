@@ -1,0 +1,11 @@
+city,department,sales,employees
+NYC,Engineering,120000,45
+NYC,Sales,95000,30
+SF,Engineering,150000,38
+SF,Design,88000,18
+Austin,Engineering,110000,25
+Austin,Sales,72000,22
+Boston,Research,130000,20
+Boston,Design,79000,12
+Seattle,Engineering,140000,41
+Seattle,Sales,91000,28

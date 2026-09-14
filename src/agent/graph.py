@@ -33,6 +33,19 @@ from src.memory.episodic_memory import (
     compact_messages_window
 )
 from src.tools.graph_tool import query_knowledge_graph
+from src.tools.data_tools import (
+    analyze_csv_summary,
+    csv_query,
+    csv_groupby,
+    save_csv_chart,
+    list_data_files,
+)
+from src.tools.git_tools import (
+    git_status,
+    git_log,
+    git_diff,
+    git_workspace_status,
+)
 
 # Load environment variables
 load_dotenv()
@@ -81,7 +94,16 @@ tools = [
     grep_search,
     view_code_slice,
     find_files_by_pattern,
-    spawn_parallel_subagents
+    spawn_parallel_subagents,
+    analyze_csv_summary,
+    csv_query,
+    csv_groupby,
+    save_csv_chart,
+    list_data_files,
+    git_status,
+    git_log,
+    git_diff,
+    git_workspace_status,
 ]
 tool_node = ToolNode(tools)
 
@@ -138,6 +160,16 @@ Direct Coding & Workspace Tools:
 - Use `execute_python_code` to perform calculations, data analysis, or test logic locally. ALWAYS print() results.
 - Use `execute_terminal_command` to execute bash/shell commands, run Node.js/C++/Go code, run tests, or manage workspace.
 - Use `read_local_file` and `write_local_file` to inspect files and create/modify code safely inside the `./workspace` sandbox.
+
+CSV / Tabular Data (free, local pandas):
+- Use `list_data_files` to discover CSV/Excel files in data/ or workspace/.
+- Use `analyze_csv_summary` for shape, dtypes, nulls, and describe stats.
+- Use `csv_query` for pandas expressions (df is available) and `csv_groupby` for aggregations.
+- Use `save_csv_chart` to render line/bar/scatter/hist charts into workspace.
+
+Git Workspace Tools (free, local):
+- Use `git_status`, `git_log`, and `git_diff` to inspect the project repository.
+- Use `git_workspace_status` to check the sandbox if it is a git repo.
 
 Always answer accurately based on the information returned by the tools.
 If you don't know the answer even after searching, say you don't know.

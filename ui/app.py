@@ -30,6 +30,8 @@ from src.memory.episodic_memory import (
     clear_all_memories,
     save_memory
 )
+from src.memory import chat_sessions
+from src.rag.citations import get_citations, format_citation_footer, clear_citations
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wide")
@@ -137,10 +139,63 @@ with st.sidebar:
     st.divider()
     
     # 4. Chat Controls
-    st.subheader("💬 Chat Controls")
-    if st.button("🗑️ Clear Chat History", use_container_width=True, type="secondary"):
+    st.subheader("💬 Chat Sessions")
+    all_sessions = chat_sessions.list_sessions()
+    session_options = {s["id"]: f"{s['title']} · {s['updated_at'][:16]}" for s in all_sessions}
+
+    if "active_session_id" not in st.session_state or st.session_state.active_session_id not in session_options:
+        st.session_state.active_session_id = chat_sessions.ensure_active_session()
+        st.session_state.messages = chat_sessions.load_messages(st.session_state.active_session_id)
+
+    if session_options:
+        selected = st.selectbox(
+            "Active session",
+            options=list(session_options.keys()),
+            format_func=lambda sid: session_options[sid],
+            index=list(session_options.keys()).index(st.session_state.active_session_id)
+            if st.session_state.active_session_id in session_options
+            else 0,
+            key="session_picker",
+        )
+        if selected != st.session_state.active_session_id:
+            st.session_state.active_session_id = selected
+            st.session_state.messages = chat_sessions.load_messages(selected)
+            st.rerun()
+
+    col_new, col_del = st.columns(2)
+    if col_new.button("➕ New Chat Session", use_container_width=True):
+        new_s = chat_sessions.create_session("New Chat")
+        st.session_state.active_session_id = new_s["id"]
         st.session_state.messages = []
-        st.success("Chat history cleared.")
+        st.success("Started a new chat session.")
+        st.rerun()
+
+    if len(all_sessions) > 1 and col_del.button("🗑️ Delete Session", use_container_width=True):
+        chat_sessions.delete_session(st.session_state.active_session_id)
+        st.session_state.active_session_id = chat_sessions.ensure_active_session()
+        st.session_state.messages = chat_sessions.load_messages(st.session_state.active_session_id)
+        st.warning("Session deleted.")
+        st.rerun()
+
+    md_export = chat_sessions.export_session_markdown(st.session_state.active_session_id)
+    st.download_button(
+        "📥 Export Session as Markdown",
+        data=md_export,
+        file_name=f"chat-session-{st.session_state.active_session_id[:8]}.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+
+    if st.button("🗑️ Clear Current Chat History", use_container_width=True, type="secondary"):
+        from src.memory.chat_sessions import _connect
+
+        with _connect() as conn:
+            conn.execute(
+                "DELETE FROM messages WHERE session_id = ?",
+                (st.session_state.active_session_id,),
+            )
+        st.session_state.messages = []
+        st.success("Chat history cleared for this session.")
         st.rerun()
 
 
@@ -168,7 +223,7 @@ with tab_chat:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages with step history
+    # Display chat messages with step history and citations
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             if "steps" in message and message["steps"]:
@@ -181,11 +236,19 @@ with tab_chat:
                             st.markdown(f"🛠️ **Tool Result:** `{step['tool']}`")
                             st.code(step.get("output", "")[:1000])
             st.markdown(message["content"])
+            if message.get("citations"):
+                with st.expander("📎 Sources & Citations", expanded=False):
+                    for i, c in enumerate(message["citations"], 1):
+                        score = c.get("score")
+                        score_txt = f" · `{score:.3f}`" if isinstance(score, (int, float)) else ""
+                        st.markdown(f"**{i}.** `{c.get('source', 'Unknown')}`{score_txt}")
+                        st.caption(c.get("preview", ""))
 
     # Accept user input
     if prompt := st.chat_input("Ask a question, request data analysis, web research, or code execution..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
+        chat_sessions.save_message(st.session_state.active_session_id, "user", prompt)
+
         with st.chat_message("user"):
             st.markdown(prompt)
 
@@ -193,11 +256,12 @@ with tab_chat:
             final_response = ""
             tool_steps = []
             registered_calls = set()
-            
+            clear_citations()
+
             status_box = st.status("🤖 Agent is analyzing & executing...", expanded=True)
             response_placeholder = st.empty()
             status_closed = False
-            
+
             try:
                 formatted_messages = []
                 for msg in st.session_state.messages:
@@ -205,12 +269,12 @@ with tab_chat:
                         formatted_messages.append(HumanMessage(content=msg["content"]))
                     elif msg["role"] == "assistant":
                         formatted_messages.append(AIMessage(content=msg["content"]))
-                
+
                 inputs = {"messages": formatted_messages}
-                
+
                 for chunk, meta in agent_app.stream(inputs, stream_mode="messages"):
                     node_name = meta.get("langgraph_node", "")
-                    
+
                     if node_name == "agent":
                         if hasattr(chunk, "tool_calls") and chunk.tool_calls:
                             for tc in chunk.tool_calls:
@@ -235,7 +299,7 @@ with tab_chat:
                             token = chunk.content
                             final_response += token
                             response_placeholder.markdown(final_response + "▌")
-                            
+
                     elif node_name == "action":
                         if isinstance(chunk, ToolMessage):
                             tool_name = getattr(chunk, "name", "tool")
@@ -249,7 +313,7 @@ with tab_chat:
                                 "tool": tool_name,
                                 "output": tool_content[:1000]
                             })
-                            
+
                     elif node_name == "grade_retrieval":
                         if isinstance(chunk, ToolMessage):
                             content = getattr(chunk, "content", "")
@@ -265,18 +329,37 @@ with tab_chat:
 
                 if not status_closed:
                     status_box.update(label="✅ Agent finished reasoning and executing", state="complete", expanded=False)
-                    
+
+                citations = get_citations()
+                if citations:
+                    final_response = (final_response.rstrip() + format_citation_footer(citations)).strip()
+
                 if final_response:
                     response_placeholder.markdown(final_response)
                 else:
                     st.warning("Agent completed execution without generating a textual response.")
-                    
+
+                if citations:
+                    with st.expander("📎 Sources & Citations", expanded=False):
+                        for i, c in enumerate(citations, 1):
+                            score = c.get("score")
+                            score_txt = f" · `{score:.3f}`" if isinstance(score, (int, float)) else ""
+                            st.markdown(f"**{i}.** `{c.get('source', 'Unknown')}`{score_txt}")
+                            st.caption(c.get("preview", ""))
+
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": final_response,
-                    "steps": tool_steps
+                    "steps": tool_steps,
+                    "citations": citations,
                 })
-                
+                chat_sessions.save_message(
+                    st.session_state.active_session_id,
+                    "assistant",
+                    final_response,
+                    steps=tool_steps,
+                )
+
             except Exception as e:
                 status_box.update(label="❌ Error occurred during execution", state="error", expanded=True)
                 st.error(f"Error during agent execution: {str(e)}")

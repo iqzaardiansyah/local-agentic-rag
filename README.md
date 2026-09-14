@@ -140,6 +140,36 @@ flowchart TD
 ### 9. 🌊 Real-Time Token-by-Token Streaming & Live Observability
 - Built on LangGraph `stream_mode="messages"` delivering real-time typewriter token generation with an animated cursor alongside interactive `st.status` reasoning traces.
 
+### 10. 💬 Persistent Chat Sessions + Markdown Export
+- SQLite-backed local session store (`data/chat_sessions.db`) — chat survives refresh/restart.
+- Create, switch, rename, delete sessions in the sidebar; first user message auto-titles the session.
+- One-click **Export Session as Markdown** download with tool traces.
+
+### 11. 📎 Citation & Source Panel
+- Hybrid RAG answers now record structured citations (source, score, preview).
+- Streamlit shows a **Sources & Citations** expander on each assistant reply.
+- The same citation payload is returned by the local REST API `/chat` endpoint.
+
+### 12. 🌐 Free Local REST API (FastAPI)
+- `GET  /health` — model endpoint status
+- `POST /chat` — full agent turn + citations
+- `POST /search` — hybrid RAG only (no LLM)
+- `POST /ingest` — push text into Chroma
+- `GET  /sessions` and `GET /sessions/{id}/export`
+- Launch: `uvicorn src.api.server:app --host 127.0.0.1 --port 8000`
+
+### 13. 📊 Offline RAG Evaluation Harness
+- Hit Rate@k, MRR, and keyword coverage on a local JSON eval set (`data/eval_set.json`).
+- Run: `python -m src.eval.rag_eval` or `python -m src.eval.rag_eval --json`
+- No paid APIs — pure local retrieval metrics for tuning.
+
+### 14. 📈 CSV / Tabular Data Tools
+- Agent tools: `list_data_files`, `analyze_csv_summary`, `csv_query`, `csv_groupby`, `save_csv_chart`.
+- pandas + matplotlib only; sample data in `data/sample_sales.csv`.
+
+### 15. 🧭 Git Workspace Tools
+- Agent tools: `git_status`, `git_log`, `git_diff`, `git_workspace_status`.
+- Inspect project changes without leaving the chat.
 ---
 
 ## 📁 Repository Structure
@@ -156,7 +186,12 @@ local-agentic-rag/
 │   ├── agent/
 │   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
 │   │   └── subagents.py       # Parallel subagent factory & dispatch engine
+│   ├── api/
+│   │   └── server.py          # Free local FastAPI REST API
+│   ├── eval/
+│   │   └── rag_eval.py        # Offline Hit@k / MRR evaluation harness
 │   ├── memory/
+│   │   ├── chat_sessions.py   # SQLite chat session persistence + Markdown export
 │   │   └── episodic_memory.py # Vector memory & sliding-window context compactor
 │   ├── mcp_server/
 │   │   ├── sqlite_server.py   # Official JSON-RPC 2.0 MCP SQLite server
@@ -165,9 +200,12 @@ local-agentic-rag/
 │   │   ├── vectorstore.py     # ChromaDB multi-format document indexer
 │   │   ├── hybrid_search.py   # BM25 + Dense Reciprocal Rank Fusion
 │   │   ├── reranker.py        # Sentence-transformers Cross-Encoder
+│   │   ├── citations.py       # In-process RAG citation store
 │   │   └── graph_rag.py       # NetworkX GraphRAG knowledge graph engine
 │   └── tools/
 │       ├── coding_tools.py    # Sandboxed terminal, file I/O, tree, grep, slice
+│       ├── data_tools.py      # CSV/Excel pandas analysis & chart tools
+│       ├── git_tools.py       # Local git status/log/diff tools
 │       ├── graph_tool.py      # Knowledge graph multi-hop query tool
 │       ├── mcp_tool.py        # MCP client tools (tables, describe, query)
 │       ├── rag_tool.py        # 2-stage hybrid search tool
@@ -175,6 +213,9 @@ local-agentic-rag/
 ├── ui/
 │   └── app.py                 # Streamlit chat & interactive workbench UI
 ├── workspace/                 # Sandboxed environment for agent-generated code
+├── data/
+│   ├── eval_set.json          # Offline RAG evaluation cases
+│   └── sample_sales.csv       # Sample tabular data for data tools
 ├── requirements.txt           # Project dependencies
 └── README.md                  # Project documentation
 ```
@@ -244,6 +285,38 @@ Open `http://localhost:8501` in your browser!
 | **`find_files_by_pattern`** | Codebase | Glob pattern search (e.g. `*.py`, `*.json`) across project directories. |
 | **`web_search`** | Web | Live internet search via DuckDuckGo. |
 | **`read_webpage`** | Web | Scrapes and converts live webpage HTML into clean readable markdown. |
+| **`list_data_files`** | Data | Lists CSV/Excel/JSON data files in `data/` and `workspace/`. |
+| **`analyze_csv_summary`** | Data | Shape, dtypes, nulls, describe stats, and preview for a CSV. |
+| **`csv_query`** | Data | Pandas expression eval against a CSV (`df` is available). |
+| **`csv_groupby`** | Data | Group-by aggregation (mean/sum/count/min/max/median/std). |
+| **`save_csv_chart`** | Data | Renders line/bar/scatter/hist charts into `workspace/`. |
+| **`git_status`** | Git | Project git status (branch + changes). |
+| **`git_log`** | Git | Recent commit history. |
+| **`git_diff`** | Git | Unified git diff (optionally staged / path-filtered). |
+| **`git_workspace_status`** | Git | Git status of `./workspace` if it is a repo. |
+
+---
+
+## 🌐 Free Local REST API
+
+```bash
+uvicorn src.api.server:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/search -H "Content-Type: application/json" -d '{"query":"hybrid search","top_k":3}'
+curl -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" -d '{"message":"Summarize the local knowledge base"}'
+```
+
+## 📊 Offline RAG Eval
+
+```bash
+python -m src.eval.rag_eval
+python -m src.eval.rag_eval --top-k 5 --json
+```
+
+Add cases to `data/eval_set.json` as `{"query", "expected_source_substring", "answer_keywords"}`.
 
 ---
 

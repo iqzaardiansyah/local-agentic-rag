@@ -1,0 +1,17 @@
+[
+  {
+    "query": "What is hybrid search in this project?",
+    "expected_source_substring": "readme",
+    "answer_keywords": ["bm25", "dense", "chroma"]
+  },
+  {
+    "query": "How does episodic memory work?",
+    "expected_source_substring": "episodic",
+    "answer_keywords": ["memory", "chroma", "recall"]
+  },
+  {
+    "query": "What tools can the coding agent use?",
+    "expected_source_substring": "coding",
+    "answer_keywords": ["workspace", "python", "terminal"]
+  }
+]
