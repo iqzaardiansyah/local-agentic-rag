@@ -60,6 +60,10 @@ class ChatRequest(BaseModel):
         True,
         description="Inject a brief of other sessions + episodic memories into context.",
     )
+    auto_memory: bool = Field(
+        True,
+        description="Heuristically capture preference phrases from this message into episodic memory.",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -68,6 +72,7 @@ class ChatResponse(BaseModel):
     steps: List[Dict[str, Any]] = Field(default_factory=list)
     session_id: Optional[str] = None
     message_count: int = 0
+    auto_memory: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class SearchRequest(BaseModel):
@@ -120,6 +125,7 @@ def _stream_chat_events(req: ChatRequest) -> Iterator[str]:
     """Yield SSE frames for one agent turn."""
     from src.memory import chat_sessions
     from src.memory.session_context import build_agent_messages
+    from src.memory.auto_memory import maybe_autocapture_preferences
     from src.agent.runner import run_agent_stream
 
     session_id = req.session_id
@@ -129,6 +135,12 @@ def _stream_chat_events(req: ChatRequest) -> Iterator[str]:
         last_user = next((m["content"] for m in reversed(last) if m["role"] == "user"), None)
         if last_user != req.message.strip():
             chat_sessions.save_message(session_id, "user", req.message)
+
+    auto_saved = maybe_autocapture_preferences(
+        req.message, session_id=session_id, enabled=req.auto_memory
+    )
+    if auto_saved:
+        yield _sse({"type": "memory_capture", "facts": auto_saved}, event="memory_capture")
 
     try:
         messages = build_agent_messages(
@@ -191,6 +203,8 @@ def _stream_chat_events(req: ChatRequest) -> Iterator[str]:
                 },
                 event="grade",
             )
+        elif etype in ("subagent_start", "subagent_done", "subagents_all_done"):
+            yield _sse(event, event=etype)
         elif etype == "done":
             final_answer = event.get("answer") or ""
             steps = event.get("steps") or []
@@ -211,6 +225,7 @@ def _stream_chat_events(req: ChatRequest) -> Iterator[str]:
                     "steps": steps,
                     "session_id": session_id,
                     "message_count": message_count,
+                    "auto_memory": auto_saved,
                 },
                 event="done",
             )
@@ -231,6 +246,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     """
     from src.memory import chat_sessions
     from src.memory.session_context import build_agent_messages
+    from src.memory.auto_memory import maybe_autocapture_preferences
     from src.agent.runner import run_agent_stream
 
     session_id = req.session_id
@@ -240,6 +256,10 @@ def chat(req: ChatRequest) -> ChatResponse:
         last_user = next((m["content"] for m in reversed(last) if m["role"] == "user"), None)
         if last_user != req.message.strip():
             chat_sessions.save_message(session_id, "user", req.message)
+
+    auto_saved = maybe_autocapture_preferences(
+        req.message, session_id=session_id, enabled=req.auto_memory
+    )
 
     try:
         messages = build_agent_messages(
@@ -284,6 +304,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         steps=final.get("steps") or [],
         session_id=session_id,
         message_count=message_count,
+        auto_memory=auto_saved,
     )
 
 
@@ -293,7 +314,9 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
     Server-Sent Events stream of one agent turn.
 
     Events (also set as SSE `event:` names):
-      meta, token, tool_call, tool_result, grade, done, error
+      meta, token, tool_call, tool_result, grade,
+      subagent_start, subagent_done, subagents_all_done,
+      memory_capture, done, error
 
     Client example:
       const es = new EventSourcePolyfill('/chat/stream', { method: 'POST', ... })
@@ -383,6 +406,19 @@ def sessions() -> Dict[str, Any]:
     from src.memory import chat_sessions
 
     return {"sessions": chat_sessions.list_sessions()}
+
+
+@app.get("/sessions/search")
+def search_sessions(
+    q: str = Query(..., min_length=1, description="Substring to find in message content"),
+    limit: int = Query(20, ge=1, le=100),
+    session_id: Optional[str] = Query(None, description="Optional restrict to one session"),
+) -> Dict[str, Any]:
+    """Search message text across all chat sessions."""
+    from src.memory import chat_sessions
+
+    hits = chat_sessions.search_messages(q, limit=limit, session_id=session_id)
+    return {"query": q, "count": len(hits), "hits": hits}
 
 
 @app.get("/sessions/{session_id}/export")

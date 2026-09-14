@@ -34,6 +34,7 @@ from src.memory.episodic_memory import (
 )
 from src.memory import chat_sessions
 from src.memory.session_context import build_agent_messages
+from src.memory.auto_memory import maybe_autocapture_preferences
 from src.rag.citations import get_citations, clear_citations
 from src.agent.runner import run_agent_stream
 from citation_view import render_citations
@@ -148,12 +149,21 @@ with st.sidebar:
     st.subheader("🧠 Long-Term Memory")
     memories = list_all_memories()
     st.caption(f"**{len(memories)} fact(s)** stored in vector memory.")
-    
+
+    if "auto_memory_enabled" not in st.session_state:
+        st.session_state.auto_memory_enabled = True
+    st.session_state.auto_memory_enabled = st.toggle(
+        "✨ Auto-capture preferences from chat",
+        value=st.session_state.auto_memory_enabled,
+        help="Heuristically store phrases like 'I prefer…', 'always…', 'remember that…' into long-term memory.",
+        key="auto_memory_toggle",
+    )
+
     if memories:
         with st.expander("🔍 View Stored Memories", expanded=False):
             for m in memories:
                 st.markdown(f"- `[{m['category'].upper()}]` {m['fact']}")
-                
+
     with st.expander("➕ Store New Memory Fact", expanded=False):
         new_fact = st.text_input("Memory Fact:", key="new_mem_fact")
         new_cat = st.selectbox("Category:", ["preference", "project_rule", "architecture", "general"], key="new_mem_cat")
@@ -224,6 +234,33 @@ with st.sidebar:
         st.warning("Session deleted.")
         st.rerun()
 
+    # --- Cross-session search ---
+    with st.expander("🔎 Search all sessions", expanded=False):
+        search_q = st.text_input(
+            "Find text in any chat",
+            key="xsession_search_q",
+            placeholder="e.g. hybrid search, pandas, user prefers…",
+        )
+        if search_q.strip():
+            hits = chat_sessions.search_messages(search_q.strip(), limit=20)
+            if not hits:
+                st.caption("No matches.")
+            else:
+                st.caption(f"{len(hits)} hit(s)")
+                for i, h in enumerate(hits):
+                    title = h.get("session_title") or "Untitled"
+                    role = "🧑" if h.get("role") == "user" else "🤖"
+                    st.markdown(f"**{role} `{title}`** · {h.get('created_at', '')[:16]}")
+                    st.caption(h.get("snippet", ""))
+                    if st.button(
+                        "Open session",
+                        key=f"xhit_{i}_{h['session_id'][:8]}",
+                        use_container_width=False,
+                    ):
+                        st.session_state.active_session_id = h["session_id"]
+                        st.session_state.messages = chat_sessions.load_messages(h["session_id"])
+                        st.rerun()
+
     md_export = chat_sessions.export_session_markdown(st.session_state.active_session_id)
     st.download_button(
         "📥 Export Session as Markdown",
@@ -288,6 +325,19 @@ with tab_chat:
     if prompt := st.chat_input("Ask a question, request data analysis, web research, or code execution..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         chat_sessions.save_message(st.session_state.active_session_id, "user", prompt)
+
+        # Auto-capture durable preferences (free heuristics, no extra LLM call)
+        auto_saved = maybe_autocapture_preferences(
+            prompt,
+            session_id=st.session_state.active_session_id,
+            enabled=st.session_state.get("auto_memory_enabled", True),
+        )
+        if auto_saved:
+            with st.chat_message("assistant"):
+                st.caption(
+                    "🧠 Auto-saved to long-term memory: "
+                    + "; ".join(f"`[{a['category']}]` {a['fact']}" for a in auto_saved)
+                )
 
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -381,6 +431,32 @@ with tab_chat:
                                 st.markdown(f"⚠️ **CRAG Grader:** `{detail}`")
                             elif label.startswith("reflexion"):
                                 st.markdown(f"🔧 **Reflexion:** `{detail}`")
+
+                    elif etype == "subagent_start":
+                        with status_box:
+                            st.markdown(
+                                f"⚡ **Subagent started:** `{event.get('name')}` "
+                                f"({event.get('role')}) · {event.get('index', 0)+1}/{event.get('total', '?')}"
+                            )
+                            st.caption(event.get("task", "")[:180])
+
+                    elif etype == "subagent_done":
+                        status = event.get("status", "")
+                        icon = "✅" if status == "success" else "❌"
+                        with status_box:
+                            st.markdown(
+                                f"{icon} **Subagent finished:** `{event.get('name')}` "
+                                f"({status}) · {event.get('elapsed_ms', '?')} ms"
+                            )
+                            st.caption(event.get("result_preview", "")[:200])
+
+                    elif etype == "subagents_all_done":
+                        with status_box:
+                            st.markdown(
+                                f"⚡ **Parallel fan-out complete:** "
+                                f"{event.get('success', 0)} ok / {event.get('error', 0)} error "
+                                f"of {event.get('count', 0)}"
+                            )
 
                     elif etype == "error":
                         status_box.update(

@@ -1,4 +1,5 @@
 import os
+import time
 import concurrent.futures
 from typing import List, Dict, Any, Annotated, Sequence, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
@@ -7,6 +8,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+
+from src.agent.subagent_events import publish_subagent_event
 
 # Import toolkits
 from src.tools.rag_tool import search_local_documents
@@ -112,65 +115,112 @@ def create_subagent_runner(role: str):
     return builder.compile()
 
 
-def execute_single_subagent(subtask: Dict[str, str]) -> Dict[str, Any]:
-    """Execute a single subagent task to completion."""
+def execute_single_subagent(subtask: Dict[str, str], index: int = 0, total: int = 1) -> Dict[str, Any]:
+    """Execute a single subagent task to completion and publish progress events."""
     role = subtask.get("role", "custom").lower()
     task = (subtask.get("task") or "").strip()
     if not task:
         task = f"Execute subagent objective for role '{role}'."
     subagent_name = subtask.get("name") or f"{role.capitalize()}-Agent"
-    
+
+    publish_subagent_event({
+        "type": "subagent_start",
+        "name": subagent_name,
+        "role": role,
+        "task": task[:300],
+        "index": index,
+        "total": total,
+    })
+    started = time.perf_counter()
+
     try:
         runner = create_subagent_runner(role)
         inputs = {"messages": [HumanMessage(content=f"Subtask Objective: {task}")]}
         result = runner.invoke(inputs)
-        
+
         last_msg = result["messages"][-1]
         output_text = getattr(last_msg, "content", "Task completed.")
+        elapsed_ms = round((time.perf_counter() - started) * 1000.0, 1)
+        publish_subagent_event({
+            "type": "subagent_done",
+            "name": subagent_name,
+            "role": role,
+            "status": "success",
+            "result_preview": str(output_text)[:240],
+            "elapsed_ms": elapsed_ms,
+            "index": index,
+            "total": total,
+        })
         return {
             "name": subagent_name,
             "role": role,
             "task": task,
             "status": "success",
-            "result": output_text
+            "result": output_text,
+            "elapsed_ms": elapsed_ms,
         }
     except Exception as e:
+        elapsed_ms = round((time.perf_counter() - started) * 1000.0, 1)
+        publish_subagent_event({
+            "type": "subagent_done",
+            "name": subagent_name,
+            "role": role,
+            "status": "error",
+            "result_preview": str(e)[:240],
+            "elapsed_ms": elapsed_ms,
+            "index": index,
+            "total": total,
+        })
         return {
             "name": subagent_name,
             "role": role,
             "task": task,
             "status": "error",
-            "result": f"Subagent error: {str(e)}"
+            "result": f"Subagent error: {str(e)}",
+            "elapsed_ms": elapsed_ms,
         }
+
 
 def run_subagents_parallel(subtasks: List[Dict[str, str]], max_workers: int = 4) -> List[Dict[str, Any]]:
     """
     Spawns multiple subagents in parallel using ThreadPoolExecutor.
     Leverages OLLAMA_NUM_PARALLEL=4 on Ollama server for concurrent multi-slot inference.
+    Publishes subagent_start / subagent_done / subagents_all_done progress events.
     """
     if not subtasks:
         return []
-        
+
     # Cap parallel execution at 4 workers to match server capacity
     worker_count = min(len(subtasks), max_workers)
-    results = []
-    
+    total = len(subtasks)
+    results: List[Dict[str, Any]] = []
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_to_task = {executor.submit(execute_single_subagent, st): st for st in subtasks}
+        future_to_task = {
+            executor.submit(execute_single_subagent, st, idx, total): (st, idx)
+            for idx, st in enumerate(subtasks)
+        }
         for future in concurrent.futures.as_completed(future_to_task):
+            st, _idx = future_to_task[future]
             try:
                 res = future.result()
                 results.append(res)
             except Exception as exc:
-                st = future_to_task[future]
                 results.append({
                     "name": st.get("name", "Subagent"),
                     "role": st.get("role", "custom"),
                     "task": st.get("task", ""),
                     "status": "error",
-                    "result": f"Execution exception: {exc}"
+                    "result": f"Execution exception: {exc}",
                 })
-                
+
+    success = sum(1 for r in results if r.get("status") == "success")
+    publish_subagent_event({
+        "type": "subagents_all_done",
+        "count": len(results),
+        "success": success,
+        "error": len(results) - success,
+    })
     return results
 
 @tool

@@ -191,6 +191,21 @@ flowchart TD
 - `src/agent/health.py` pings the OpenAI-compatible `/v1/models` (with Ollama `/api/tags` fallback).
 - Sidebar shows ONLINE/OFFLINE + latency (cached ~30s) with a manual ↻ re-check.
 - `/health` returns `llm` and `bm25` status; chat warns before a turn if the endpoint is down.
+
+### 20. ⚡ Live Parallel Subagent Visibility
+- `spawn_parallel_subagents` publishes `subagent_start` / `subagent_done` / `subagents_all_done` through a thread-safe observer bus.
+- The agent runner runs the graph on a worker thread so those events interleave live with tokens/tools.
+- Streamlit status panel and SSE clients see each fan-out agent as it starts and finishes.
+
+### 21. ✨ Auto Episodic Memory Capture
+- Heuristics (`src/memory/auto_memory.py`) detect phrases like “I prefer…”, “always…”, “remember that…”.
+- Facts are stored with category + session_id; near-duplicates are skipped.
+- Sidebar toggle; API `auto_memory` flag + `memory_capture` SSE event / response field.
+
+### 22. 🔎 Cross-Session Chat Search
+- `chat_sessions.search_messages()` does case-insensitive substring search across all sessions.
+- Sidebar “Search all sessions” expander with Open-session jump buttons.
+- `GET /sessions/search?q=...` for API clients.
 ---
 
 ## 📁 Repository Structure
@@ -208,13 +223,15 @@ local-agentic-rag/
 │   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
 │   │   ├── health.py          # Local LLM endpoint health probe
 │   │   ├── runner.py          # Shared event-stream runner (UI + API + SSE)
+│   │   ├── subagent_events.py # Thread-safe parallel-subagent progress bus
 │   │   └── subagents.py       # Parallel subagent factory & dispatch engine
 │   ├── api/
 │   │   └── server.py          # Free local FastAPI REST API + SSE
 │   ├── eval/
 │   │   └── rag_eval.py        # Offline Hit@k / MRR evaluation harness
 │   ├── memory/
-│   │   ├── chat_sessions.py   # SQLite chat session persistence + Markdown export
+│   │   ├── auto_memory.py     # Heuristic preference capture → episodic store
+│   │   ├── chat_sessions.py   # SQLite chat session persistence + search/export
 │   │   ├── session_context.py # Multi-turn + cross-session context builder
 │   │   └── episodic_memory.py # Vector memory & sliding-window context compactor
 │   ├── mcp_server/
@@ -335,9 +352,10 @@ curl -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" -d '
 curl -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: application/json" -d '{"message":"List data files","session_id":"demo-1"}'
 curl -X POST http://127.0.0.1:8000/reindex/bm25
 curl "http://127.0.0.1:8000/sources?name=README.md"
+curl "http://127.0.0.1:8000/sessions/search?q=hybrid"
 ```
 
-SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `done`, `error`.
+SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `subagent_start`, `subagent_done`, `subagents_all_done`, `memory_capture`, `done`, `error`.
 
 When `session_id` is set on `/chat` or `/chat/stream`, prior turns in that session are used as multi-turn context and the exchange is persisted (with citations).
 

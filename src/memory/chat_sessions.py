@@ -271,3 +271,57 @@ def ensure_active_session() -> str:
     if sessions:
         return sessions[0]["id"]
     return create_session("New Chat")["id"]
+
+
+def search_messages(
+    query: str,
+    limit: int = 30,
+    session_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Search chat message content across sessions (case-insensitive substring).
+
+    Returns hits with session title, role, snippet, and created_at.
+    Optionally restrict to one session_id.
+    """
+    init_db()
+    if not query or not query.strip():
+        return []
+    q = f"%{query.strip()}%"
+    sql = (
+        "SELECT m.session_id AS session_id, s.title AS session_title, "
+        "m.role AS role, m.content AS content, m.created_at AS created_at "
+        "FROM messages m JOIN sessions s ON s.id = m.session_id "
+        "WHERE m.content LIKE ? COLLATE NOCASE"
+    )
+    params: List[Any] = [q]
+    if session_id:
+        sql += " AND m.session_id = ?"
+        params.append(session_id)
+    sql += " ORDER BY m.created_at DESC LIMIT ?"
+    params.append(max(1, min(int(limit), 100)))
+
+    with _connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    hits: List[Dict[str, Any]] = []
+    needle = query.strip().lower()
+    for r in rows:
+        content = r["content"] or ""
+        low = content.lower()
+        idx = low.find(needle)
+        if idx < 0:
+            snippet = content[:160]
+        else:
+            start = max(0, idx - 40)
+            end = min(len(content), idx + len(needle) + 80)
+            snippet = ("…" if start > 0 else "") + content[start:end] + ("…" if end < len(content) else "")
+        snippet = " ".join(snippet.split())
+        hits.append({
+            "session_id": r["session_id"],
+            "session_title": r["session_title"],
+            "role": r["role"],
+            "snippet": snippet,
+            "created_at": r["created_at"],
+        })
+    return hits
