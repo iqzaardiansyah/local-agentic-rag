@@ -38,6 +38,7 @@ def init_db() -> None:
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 steps TEXT,
+                citations TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
@@ -46,6 +47,10 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)"
         )
+        # Lightweight migration for DBs created before the citations column existed.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "citations" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN citations TEXT")
 
 
 def _now() -> str:
@@ -91,14 +96,37 @@ def delete_session(session_id: str) -> bool:
     return cur.rowcount > 0
 
 
-def load_messages(session_id: str) -> List[Dict[str, Any]]:
+def clear_messages(session_id: str) -> int:
+    """Delete all messages in a session; returns how many rows were removed."""
     init_db()
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT role, content, steps, created_at FROM messages "
-            "WHERE session_id = ? ORDER BY id ASC",
-            (session_id,),
-        ).fetchall()
+        cur = conn.execute(
+            "DELETE FROM messages WHERE session_id = ?", (session_id,)
+        )
+    return cur.rowcount
+
+
+def load_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Load messages for a session in chronological order.
+
+    limit: if set, return only the most recent N messages (still chronological).
+    """
+    init_db()
+    with _connect() as conn:
+        if limit and limit > 0:
+            rows = conn.execute(
+                "SELECT role, content, steps, citations, created_at FROM messages "
+                "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                (session_id, int(limit)),
+            ).fetchall()
+            rows = list(reversed(rows))
+        else:
+            rows = conn.execute(
+                "SELECT role, content, steps, citations, created_at FROM messages "
+                "WHERE session_id = ? ORDER BY id ASC",
+                (session_id,),
+            ).fetchall()
     messages = []
     for r in rows:
         msg = {
@@ -111,6 +139,11 @@ def load_messages(session_id: str) -> List[Dict[str, Any]]:
                 msg["steps"] = json.loads(r["steps"])
             except json.JSONDecodeError:
                 msg["steps"] = []
+        if r["citations"]:
+            try:
+                msg["citations"] = json.loads(r["citations"])
+            except json.JSONDecodeError:
+                msg["citations"] = []
         messages.append(msg)
     return messages
 
@@ -120,15 +153,17 @@ def save_message(
     role: str,
     content: str,
     steps: Optional[List[Dict[str, Any]]] = None,
+    citations: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     init_db()
     ts = _now()
     steps_json = json.dumps(steps, default=str) if steps else None
+    citations_json = json.dumps(citations, default=str) if citations else None
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO messages (session_id, role, content, steps, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, steps_json, ts),
+            "INSERT INTO messages (session_id, role, content, steps, citations, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, role, content, steps_json, citations_json, ts),
         )
         # Auto-title from first user message
         if role == "user":
@@ -175,6 +210,16 @@ def export_session_markdown(session_id: str) -> str:
         lines.append("")
         lines.append(m.get("content") or "*(no text)*")
         lines.append("")
+        citations = m.get("citations") or []
+        if citations:
+            lines.append("**Sources:**")
+            for c in citations:
+                score = c.get("score")
+                score_txt = f" (score {score:.3f})" if isinstance(score, (int, float)) else ""
+                path = c.get("path")
+                path_txt = f" — `{path}`" if path else ""
+                lines.append(f"- `{c.get('source', 'Unknown')}`{score_txt}{path_txt}")
+            lines.append("")
         steps = m.get("steps") or []
         if steps:
             lines.append("<details>")
@@ -196,6 +241,27 @@ def export_session_markdown(session_id: str) -> str:
     lines.append("---")
     lines.append(f"*Exported locally from Local Agentic RAG on {datetime.now().isoformat(timespec='seconds')}*")
     return "\n".join(lines)
+
+
+def ensure_session(session_id: str, title: str = "API Chat") -> str:
+    """
+    Ensure a session row exists for the given id (creating it if needed).
+    Returns the same session_id. Useful when clients supply their own ids.
+    """
+    if not session_id:
+        return create_session(title)["id"]
+    init_db()
+    ts = _now()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (session_id, title[:120], ts, ts),
+            )
+    return session_id
 
 
 def ensure_active_session() -> str:

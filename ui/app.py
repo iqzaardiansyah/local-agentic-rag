@@ -2,19 +2,18 @@ import streamlit as st
 import os
 import sys
 import difflib
-import subprocess
 import time
-from pathlib import Path
 
 # Ensure the root directory is in the path to import src
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+ROOT = os.path.dirname(os.path.dirname(__file__))
+sys.path.append(ROOT)
+sys.path.append(os.path.dirname(__file__))
 
-from src.agent.graph import app as agent_app, LLM_MODEL, LLM_BASE_URL
+from src.agent.graph import LLM_MODEL, LLM_BASE_URL
 from src.tools.coding_tools import (
     list_workspace_files,
     clean_workspace,
     WORKSPACE_DIR,
-    read_local_file,
     write_local_file,
     execute_terminal_command
 )
@@ -31,8 +30,10 @@ from src.memory.episodic_memory import (
     save_memory
 )
 from src.memory import chat_sessions
-from src.rag.citations import get_citations, format_citation_footer, clear_citations
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from src.memory.session_context import build_agent_messages
+from src.rag.citations import get_citations, clear_citations
+from src.agent.runner import run_agent_stream
+from citation_view import render_citations
 
 st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wide")
 
@@ -187,13 +188,7 @@ with st.sidebar:
     )
 
     if st.button("🗑️ Clear Current Chat History", use_container_width=True, type="secondary"):
-        from src.memory.chat_sessions import _connect
-
-        with _connect() as conn:
-            conn.execute(
-                "DELETE FROM messages WHERE session_id = ?",
-                (st.session_state.active_session_id,),
-            )
+        chat_sessions.clear_messages(st.session_state.active_session_id)
         st.session_state.messages = []
         st.success("Chat history cleared for this session.")
         st.rerun()
@@ -223,8 +218,8 @@ with tab_chat:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages with step history and citations
-    for message in st.session_state.messages:
+    # Display chat messages with step history and clickable citations
+    for msg_idx, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             if "steps" in message and message["steps"]:
                 with st.expander("🔍 View Agent Thought Trace & Tool History", expanded=False):
@@ -237,12 +232,11 @@ with tab_chat:
                             st.code(step.get("output", "")[:1000])
             st.markdown(message["content"])
             if message.get("citations"):
-                with st.expander("📎 Sources & Citations", expanded=False):
-                    for i, c in enumerate(message["citations"], 1):
-                        score = c.get("score")
-                        score_txt = f" · `{score:.3f}`" if isinstance(score, (int, float)) else ""
-                        st.markdown(f"**{i}.** `{c.get('source', 'Unknown')}`{score_txt}")
-                        st.caption(c.get("preview", ""))
+                render_citations(
+                    message["citations"],
+                    key_prefix=f"hist_{msg_idx}",
+                    expanded=False,
+                )
 
     # Accept user input
     if prompt := st.chat_input("Ask a question, request data analysis, web research, or code execution..."):
@@ -255,7 +249,6 @@ with tab_chat:
         with st.chat_message("assistant"):
             final_response = ""
             tool_steps = []
-            registered_calls = set()
             clear_citations()
 
             status_box = st.status("🤖 Agent is analyzing & executing...", expanded=True)
@@ -263,89 +256,103 @@ with tab_chat:
             status_closed = False
 
             try:
-                formatted_messages = []
-                for msg in st.session_state.messages:
-                    if msg["role"] == "user":
-                        formatted_messages.append(HumanMessage(content=msg["content"]))
-                    elif msg["role"] == "assistant":
-                        formatted_messages.append(AIMessage(content=msg["content"]))
+                # Session-aware multi-turn: history + cross-session brief + episodic recall
+                agent_messages = build_agent_messages(
+                    prompt,
+                    session_id=st.session_state.active_session_id,
+                    include_cross_session=True,
+                )
 
-                inputs = {"messages": formatted_messages}
+                for event in run_agent_stream(
+                    prompt,
+                    session_id=st.session_state.active_session_id,
+                    history=agent_messages,
+                ):
+                    etype = event.get("type")
 
-                for chunk, meta in agent_app.stream(inputs, stream_mode="messages"):
-                    node_name = meta.get("langgraph_node", "")
+                    if etype == "meta":
+                        with status_box:
+                            st.caption(
+                                f"Context: {event.get('message_count', 0)} messages · "
+                                f"session `{(event.get('session_id') or '')[:8]}`"
+                            )
 
-                    if node_name == "agent":
-                        if hasattr(chunk, "tool_calls") and chunk.tool_calls:
-                            for tc in chunk.tool_calls:
-                                call_id = tc.get("id") or str(tc)
-                                if call_id not in registered_calls:
-                                    registered_calls.add(call_id)
-                                    tool_name = tc.get("name", "tool")
-                                    tool_args = tc.get("args", {})
-                                    with status_box:
-                                        st.markdown(f"🧠 **Model decided to use:** `{tool_name}`")
-                                        with st.expander(f"📥 Input to `{tool_name}`", expanded=False):
-                                            st.json(tool_args)
-                                    tool_steps.append({
-                                        "type": "call",
-                                        "tool": tool_name,
-                                        "args": tool_args
-                                    })
-                        elif getattr(chunk, "content", None):
-                            if not status_closed and len(tool_steps) > 0:
-                                status_box.update(label="✅ Tools executed. Streaming final answer...", state="complete", expanded=False)
-                                status_closed = True
-                            token = chunk.content
-                            final_response += token
-                            response_placeholder.markdown(final_response + "▌")
+                    elif etype == "tool_call":
+                        tool_name = event.get("tool", "tool")
+                        tool_args = event.get("args", {})
+                        with status_box:
+                            st.markdown(f"🧠 **Model decided to use:** `{tool_name}`")
+                            with st.expander(f"📥 Input to `{tool_name}`", expanded=False):
+                                st.json(tool_args)
+                        tool_steps.append({
+                            "type": "call",
+                            "tool": tool_name,
+                            "args": tool_args
+                        })
 
-                    elif node_name == "action":
-                        if isinstance(chunk, ToolMessage):
-                            tool_name = getattr(chunk, "name", "tool")
-                            tool_content = getattr(chunk, "content", "")
-                            with status_box:
-                                st.markdown(f"🛠️ **Tool Executed:** `{tool_name}`")
-                                with st.expander(f"📤 Output from `{tool_name}`", expanded=False):
-                                    st.code(tool_content if len(tool_content) <= 1500 else tool_content[:1500] + "\n...[truncated for display]")
-                            tool_steps.append({
-                                "type": "result",
-                                "tool": tool_name,
-                                "output": tool_content[:1000]
-                            })
+                    elif etype == "token":
+                        if not status_closed and len(tool_steps) > 0:
+                            status_box.update(
+                                label="✅ Tools executed. Streaming final answer...",
+                                state="complete",
+                                expanded=False,
+                            )
+                            status_closed = True
+                        final_response += event.get("token", "")
+                        response_placeholder.markdown(final_response + "▌")
 
-                    elif node_name == "grade_retrieval":
-                        if isinstance(chunk, ToolMessage):
-                            content = getattr(chunk, "content", "")
-                            with status_box:
-                                if "High Confidence Match" in content:
-                                    st.markdown("🎯 **CRAG Grader:** `Verified local documents as relevant & grounded.`")
-                                elif "Low Local Document Relevance" in content:
-                                    st.markdown("⚠️ **CRAG Grader:** `Low relevance score. Guiding agent to avoid hallucination.`")
-                                elif "Reflexion Auto-Debugger: Execution Failure Detected" in content:
-                                    st.markdown("🔧 **Reflexion Auto-Debugger:** `Execution error caught! Guiding agent into auto-fix loop...`")
-                                elif "Reflexion Auto-Debugger: Execution verified" in content:
-                                    st.markdown("🎯 **Reflexion Auto-Debugger:** `Code execution verified with zero errors.`")
+                    elif etype == "tool_result":
+                        tool_name = event.get("tool", "tool")
+                        tool_content = event.get("output", "") or ""
+                        with status_box:
+                            st.markdown(f"🛠️ **Tool Executed:** `{tool_name}`")
+                            with st.expander(f"📤 Output from `{tool_name}`", expanded=False):
+                                st.code(
+                                    tool_content if len(tool_content) <= 1500
+                                    else tool_content[:1500] + "\n...[truncated for display]"
+                                )
+                        tool_steps.append({
+                            "type": "result",
+                            "tool": tool_name,
+                            "output": tool_content[:1000]
+                        })
+
+                    elif etype == "grade":
+                        label = event.get("label", "")
+                        detail = event.get("detail", "")
+                        with status_box:
+                            if label.startswith("crag_high"):
+                                st.markdown(f"🎯 **CRAG Grader:** `{detail}`")
+                            elif label.startswith("crag_low"):
+                                st.markdown(f"⚠️ **CRAG Grader:** `{detail}`")
+                            elif label.startswith("reflexion"):
+                                st.markdown(f"🔧 **Reflexion:** `{detail}`")
+
+                    elif etype == "error":
+                        status_box.update(
+                            label="❌ Error occurred during execution",
+                            state="error",
+                            expanded=True,
+                        )
+                        st.error(f"Error during agent execution: {event.get('error')}")
+                        st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
+                        final_response = final_response or f"Error: {event.get('error')}"
+                        break
 
                 if not status_closed:
-                    status_box.update(label="✅ Agent finished reasoning and executing", state="complete", expanded=False)
+                    status_box.update(
+                        label="✅ Agent finished reasoning and executing",
+                        state="complete",
+                        expanded=False,
+                    )
 
                 citations = get_citations()
-                if citations:
-                    final_response = (final_response.rstrip() + format_citation_footer(citations)).strip()
-
                 if final_response:
                     response_placeholder.markdown(final_response)
                 else:
                     st.warning("Agent completed execution without generating a textual response.")
 
-                if citations:
-                    with st.expander("📎 Sources & Citations", expanded=False):
-                        for i, c in enumerate(citations, 1):
-                            score = c.get("score")
-                            score_txt = f" · `{score:.3f}`" if isinstance(score, (int, float)) else ""
-                            st.markdown(f"**{i}.** `{c.get('source', 'Unknown')}`{score_txt}")
-                            st.caption(c.get("preview", ""))
+                render_citations(citations, key_prefix="live", expanded=bool(citations))
 
                 st.session_state.messages.append({
                     "role": "assistant",
@@ -358,6 +365,7 @@ with tab_chat:
                     "assistant",
                     final_response,
                     steps=tool_steps,
+                    citations=citations,
                 )
 
             except Exception as e:

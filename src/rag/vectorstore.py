@@ -34,22 +34,35 @@ def load_file_content(file_path: str) -> List[Document]:
     """Extract Document chunks from various file types (.pdf, .txt, .md, .csv, .json)."""
     ext = os.path.splitext(file_path)[1].lower()
     filename = os.path.basename(file_path)
-    
+    abs_path = os.path.abspath(file_path)
+    # Prefer paths relative to project root so citations stay portable.
+    try:
+        rel_path = os.path.relpath(abs_path, ROOT_DIR).replace("\\", "/")
+    except ValueError:
+        rel_path = filename
+    meta = {"source": filename, "path": rel_path, "abs_path": abs_path}
+
     try:
         if ext == ".pdf":
             loader = PyPDFLoader(file_path)
-            return loader.load()
+            docs = loader.load()
+            for d in docs:
+                d.metadata = {**meta, **(d.metadata or {}), "source": filename, "path": rel_path}
+            return docs
         elif ext == ".csv":
             loader = CSVLoader(file_path)
-            return loader.load()
+            docs = loader.load()
+            for d in docs:
+                d.metadata = {**meta, **(d.metadata or {}), "source": filename, "path": rel_path}
+            return docs
         elif ext in [".txt", ".md", ".json", ".py", ".js", ".html"]:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 text = f.read()
-            return [Document(page_content=text, metadata={"source": filename})]
+            return [Document(page_content=text, metadata=meta)]
         else:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 text = f.read()
-            return [Document(page_content=text, metadata={"source": filename})]
+            return [Document(page_content=text, metadata=meta)]
     except Exception as e:
         print(f"Error loading {file_path}: {e}")
         return []

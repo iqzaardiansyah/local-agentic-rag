@@ -143,31 +143,37 @@ flowchart TD
 ### 10. 💬 Persistent Chat Sessions + Markdown Export
 - SQLite-backed local session store (`data/chat_sessions.db`) — chat survives refresh/restart.
 - Create, switch, rename, delete sessions in the sidebar; first user message auto-titles the session.
-- One-click **Export Session as Markdown** download with tool traces.
+- One-click **Export Session as Markdown** download with tool traces and citations.
 
-### 11. 📎 Citation & Source Panel
-- Hybrid RAG answers now record structured citations (source, score, preview).
-- Streamlit shows a **Sources & Citations** expander on each assistant reply.
-- The same citation payload is returned by the local REST API `/chat` endpoint.
+### 11. 📎 Clickable Citations & Source Panel
+- Hybrid RAG answers record structured citations (source, score, preview, **resolved path**).
+- Streamlit shows a **Sources & Citations** panel with Open source (matched snippet + file preview) and Download.
+- `/search` and `/sources` API endpoints return path-resolved citations for external clients.
 
-### 12. 🌐 Free Local REST API (FastAPI)
+### 12. 🌐 Free Local REST API (FastAPI) + SSE Streaming
 - `GET  /health` — model endpoint status
-- `POST /chat` — full agent turn + citations
-- `POST /search` — hybrid RAG only (no LLM)
-- `POST /ingest` — push text into Chroma
-- `GET  /sessions` and `GET /sessions/{id}/export`
+- `POST /chat` — session-aware multi-turn agent turn + citations
+- `POST /chat/stream` — **Server-Sent Events** stream (`meta` / `token` / `tool_call` / `tool_result` / `grade` / `done` / `error`)
+- `POST /search` — hybrid RAG only (no LLM), path-resolved citations
+- `POST /ingest` — push text into Chroma (also saves a copy under `data/`)
+- `GET  /sessions`, `GET /sessions/{id}/export`, `GET /sources?name=...`
 - Launch: `uvicorn src.api.server:app --host 127.0.0.1 --port 8000`
 
-### 13. 📊 Offline RAG Evaluation Harness
+### 13. 🧠 Session-Aware Multi-Turn Context
+- Shared `src/memory/session_context.py` + `src/agent/runner.py` used by both UI and API.
+- Within-session history is rebuilt each turn; other sessions + episodic memories are injected as a brief system note.
+- Citations and tool steps persist with each assistant turn.
+
+### 14. 📊 Offline RAG Evaluation Harness
 - Hit Rate@k, MRR, and keyword coverage on a local JSON eval set (`data/eval_set.json`).
 - Run: `python -m src.eval.rag_eval` or `python -m src.eval.rag_eval --json`
 - No paid APIs — pure local retrieval metrics for tuning.
 
-### 14. 📈 CSV / Tabular Data Tools
+### 15. 📈 CSV / Tabular Data Tools
 - Agent tools: `list_data_files`, `analyze_csv_summary`, `csv_query`, `csv_groupby`, `save_csv_chart`.
 - pandas + matplotlib only; sample data in `data/sample_sales.csv`.
 
-### 15. 🧭 Git Workspace Tools
+### 16. 🧭 Git Workspace Tools
 - Agent tools: `git_status`, `git_log`, `git_diff`, `git_workspace_status`.
 - Inspect project changes without leaving the chat.
 ---
@@ -185,13 +191,15 @@ local-agentic-rag/
 ├── src/
 │   ├── agent/
 │   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
+│   │   ├── runner.py          # Shared event-stream runner (UI + API + SSE)
 │   │   └── subagents.py       # Parallel subagent factory & dispatch engine
 │   ├── api/
-│   │   └── server.py          # Free local FastAPI REST API
+│   │   └── server.py          # Free local FastAPI REST API + SSE
 │   ├── eval/
 │   │   └── rag_eval.py        # Offline Hit@k / MRR evaluation harness
 │   ├── memory/
 │   │   ├── chat_sessions.py   # SQLite chat session persistence + Markdown export
+│   │   ├── session_context.py # Multi-turn + cross-session context builder
 │   │   └── episodic_memory.py # Vector memory & sliding-window context compactor
 │   ├── mcp_server/
 │   │   ├── sqlite_server.py   # Official JSON-RPC 2.0 MCP SQLite server
@@ -211,7 +219,8 @@ local-agentic-rag/
 │       ├── rag_tool.py        # 2-stage hybrid search tool
 │       └── web_scraper.py     # DuckDuckGo web search & HTML scraper
 ├── ui/
-│   └── app.py                 # Streamlit chat & interactive workbench UI
+│   ├── app.py                 # Streamlit chat & interactive workbench UI
+│   └── citation_view.py       # Clickable citation open/preview/download panel
 ├── workspace/                 # Sandboxed environment for agent-generated code
 ├── data/
 │   ├── eval_set.json          # Offline RAG evaluation cases
@@ -306,8 +315,14 @@ uvicorn src.api.server:app --host 127.0.0.1 --port 8000
 ```bash
 curl http://127.0.0.1:8000/health
 curl -X POST http://127.0.0.1:8000/search -H "Content-Type: application/json" -d '{"query":"hybrid search","top_k":3}'
-curl -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" -d '{"message":"Summarize the local knowledge base"}'
+curl -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" -d '{"message":"Summarize the local knowledge base","session_id":"demo-1"}'
+curl -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: application/json" -d '{"message":"List data files","session_id":"demo-1"}'
+curl "http://127.0.0.1:8000/sources?name=README.md"
 ```
+
+SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `done`, `error`.
+
+When `session_id` is set on `/chat` or `/chat/stream`, prior turns in that session are used as multi-turn context and the exchange is persisted (with citations).
 
 ## 📊 Offline RAG Eval
 

@@ -25,13 +25,15 @@ def search_local_documents(query: str) -> str:
         results = []
         citations = []
         for doc, score in reranked_pairs:
-            src = doc.metadata.get('source', 'Unknown')
+            meta = doc.metadata or {}
+            src = meta.get("source") or meta.get("path") or meta.get("filename") or "Unknown"
             preview = (doc.page_content or "")[:160].replace("\n", " ")
             results.append(f"Source: {src} (Relevance Score: {score:.3f})\nContent: {doc.page_content}")
             citations.append({
                 "source": src,
                 "score": float(score),
                 "preview": preview,
+                "chunk_preview": preview,
             })
         set_citations(citations)
 

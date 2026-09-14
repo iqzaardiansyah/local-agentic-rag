@@ -133,22 +133,27 @@ def store_episodic_memory(fact: str, category: str = "general") -> str:
 def compact_messages_window(messages: List[BaseMessage], max_recent: int = 8) -> List[BaseMessage]:
     """
     Applies sliding-window compaction with background running summary.
-    Preserves system message, ensures at least one HumanMessage (user query) is preserved,
-    and maintains the most recent `max_recent` messages.
+    Preserves leading SystemMessages (main prompt + session-context briefs),
+    ensures at least one HumanMessage (user query) is preserved,
+    and maintains the most recent `max_recent` non-system messages.
     """
     if not messages:
         return [HumanMessage(content="Hello")]
 
-    system_msg = messages[0] if isinstance(messages[0], SystemMessage) else None
-    working_msgs = messages[1:] if system_msg else messages
-    
+    system_msgs: List[BaseMessage] = []
+    idx = 0
+    while idx < len(messages) and isinstance(messages[idx], SystemMessage):
+        system_msgs.append(messages[idx])
+        idx += 1
+    working_msgs = list(messages[idx:])
+
     if len(working_msgs) <= max_recent:
-        return messages
-        
+        return list(system_msgs) + working_msgs
+
     # Split into old messages (to summarize) and recent messages (to keep verbatim)
     old_msgs = working_msgs[:-max_recent]
     recent_msgs = working_msgs[-max_recent:]
-    
+
     # Generate compact bullet points summary of older messages
     summary_lines = []
     last_old_human_msg = None
@@ -163,23 +168,21 @@ def compact_messages_window(messages: List[BaseMessage], max_recent: int = 8) ->
         text = str(m.content)[:100].replace("\n", " ")
         if text.strip():
             summary_lines.append(f"- {role}: {text}...")
-            
+
     summary_content = (
         "📌 [Previous Conversation Context Summary]:\n" +
         "\n".join(summary_lines[-6:]) + "\n" +
         "*(Earlier detailed messages compressed to preserve token budget)*"
     )
-    
+
     summary_msg = SystemMessage(content=summary_content)
-    
+
     # Check if recent_msgs already contains a valid user query (HumanMessage)
     has_recent_user_query = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in recent_msgs)
-    
-    result = []
-    if system_msg:
-        result.append(system_msg)
+
+    result = list(system_msgs)
     result.append(summary_msg)
-    
+
     # If recent messages don't have a user message (e.g. only tool execution outputs),
     # carry forward the user query so Ollama/Qwen chat templates find the required user query.
     if not has_recent_user_query:
@@ -187,6 +190,6 @@ def compact_messages_window(messages: List[BaseMessage], max_recent: int = 8) ->
             result.append(last_old_human_msg)
         else:
             result.append(HumanMessage(content="Please continue with the user objective."))
-            
+
     result.extend(recent_msgs)
     return result

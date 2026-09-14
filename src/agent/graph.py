@@ -178,20 +178,25 @@ If you don't know the answer even after searching, say you don't know.
 
 # 4. Define Graph Nodes
 def agent_node(state: AgentState):
-    messages = state["messages"]
-    
-    # Ensure system prompt is present
-    if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
-        
+    messages = list(state["messages"] or [])
+
+    # Always keep the main system prompt first. Extra SystemMessages
+    # (e.g. session-context briefs) may follow it.
+    has_main_prompt = any(
+        isinstance(m, SystemMessage) and str(m.content).startswith("You are OmniLocal-LeadAgent")
+        for m in messages[:3]
+    )
+    if not has_main_prompt:
+        messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
+
     # Apply hierarchical context compaction (sliding window + running summary)
     compacted_messages = compact_messages_window(messages, max_recent=8)
-    
+
     # Guard to prevent "no user query found in messages" errors in Qwen/Ollama chat templates
     has_user = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in compacted_messages)
     if not has_user:
         compacted_messages.append(HumanMessage(content="Please proceed with the task."))
-        
+
     response = llm_with_tools.invoke(compacted_messages)
     return {"messages": [response]}
 
