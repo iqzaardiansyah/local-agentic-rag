@@ -7,6 +7,155 @@ from networkx.readwrite import json_graph
 
 GRAPH_DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "knowledge_graph.json")
 
+# Shared stop-ish tokens that should not be entity heads (noise control).
+_ENTITY_STOP = {
+    "the", "this", "that", "these", "those", "there", "here", "and", "but",
+    "for", "with", "from", "into", "onto", "over", "under", "about", "after",
+    "before", "between", "through", "using", "used", "use", "also", "very",
+    "more", "most", "some", "any", "each", "every", "all", "both", "such",
+    "when", "where", "while", "which", "who", "whom", "whose", "what", "how",
+    "why", "because", "therefore", "however", "although", "unless", "until",
+    "please", "note", "example", "examples", "section", "chapter", "page",
+    "figure", "table", "item", "items", "list", "number", "value", "values",
+    "file", "files", "line", "lines", "code", "text", "content", "data",
+    "user", "users", "system", "systems", "project", "projects", "name",
+    "names", "type", "types", "set", "get", "run", "make", "take", "give",
+}
+
+
+def _clean_entity(raw: str) -> str:
+    """Trim punctuation/whitespace and collapse internal spacing."""
+    s = re.sub(r"\s+", " ", (raw or "").strip())
+    s = s.strip(" \t\n\r.,;:!?()[]{}\"'`“”‘’")
+    # Drop trailing verbs/adverbs that regex sometimes swallows
+    s = re.sub(
+        r"\s+(?:is|are|was|were|be|been|being|to|of|in|on|at|by|for|and|or|the|a|an)$",
+        "",
+        s,
+        flags=re.I,
+    ).strip(" .,;:")
+    return s
+
+
+def _entity_ok(ent: str) -> bool:
+    """Reject noisy / non-entity strings so the graph does not flood."""
+    if not ent or len(ent) < 2 or len(ent) > 48:
+        return False
+    # Must contain at least one letter
+    if not re.search(r"[A-Za-z]", ent):
+        return False
+    # Reject if entirely stopwords
+    tokens = [t.lower() for t in re.findall(r"[A-Za-z0-9_]+", ent)]
+    if tokens and all(t in _ENTITY_STOP for t in tokens):
+        return False
+    # Reject sentence-like fragments (too many lowercase function words)
+    if len(tokens) >= 6:
+        return False
+    # Reject if mostly non-alphanumeric
+    alnum = sum(1 for c in ent if c.isalnum() or c in " _-")
+    if alnum / max(len(ent), 1) < 0.7:
+        return False
+    return True
+
+
+def _looks_like_proper_or_technical(ent: str) -> bool:
+    """Prefer capitalized heads, digits, or known multiword proper names."""
+    head = ent.strip().split()[0] if ent.strip() else ""
+    if head[:1].isupper():
+        return True
+    if any(ch.isdigit() for ch in ent):
+        return True
+    # CamelCase / ALLCAPS tech tokens
+    if re.search(r"[A-Z]{2,}", ent) or re.search(r"[a-z]+[A-Z]", ent):
+        return True
+    return False
+
+
+# Relation patterns. Each: (regex, predicate, require_proper_object)
+# Patterns are intentionally conservative to avoid graph flood.
+_KG_PATTERNS = [
+    # X uses / utilizes / leverages / integrates / is built with Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Z][A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:uses|utilizes|utilises|leverages|integrates|employs)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Z][A-Za-z0-9_.\-]{0,30}){0,3})",
+        "USES",
+        True,
+    ),
+    # Y is used by X  →  X USES Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+is\s+used\s+by\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "USES",
+        True,
+    ),
+    # X leads / manages / directs / heads / runs Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Z][A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:leads|manages|directs|heads|oversees|runs)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "LEADS",
+        True,
+    ),
+    # X works in / works for / belongs to / is part of / is a member of Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:works\s+(?:in|for|at)|belongs\s+to|is\s+part\s+of|is\s+a\s+member\s+of|is\s+managed\s+by)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "BELONGS_TO",
+        True,
+    ),
+    # X depends on / requires / relies on Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:depends\s+on|requires|relies\s+on)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "DEPENDS_ON",
+        True,
+    ),
+    # X includes / contains / features Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:includes|contains|features)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "INCLUDES",
+        True,
+    ),
+    # X is built with / powered by / based on Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:is\s+built\s+with|is\s+powered\s+by|is\s+based\s+on|is\s+implemented\s+(?:in|with))\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "BUILT_WITH",
+        True,
+    ),
+    # X created / authored / wrote / developed Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:created|authored|wrote|developed|founded|invented)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "CREATED",
+        True,
+    ),
+    # X has a budget of / budget is $Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:has\s+a\s+budget\s+of|budget\s+is)\s+(\$[0-9][0-9,\.]*)",
+        "HAS_BUDGET",
+        False,
+    ),
+    # X is located in / based in / headquartered in Y
+    (
+        r"\b([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{1,30}){0,3})\s+"
+        r"(?:is\s+located\s+in|is\s+based\s+in|is\s+headquartered\s+in)\s+"
+        r"([A-Z][A-Za-z0-9_.\-]{1,30}(?:\s+[A-Za-z0-9_.\-]{0,30}){0,3})",
+        "LOCATED_IN",
+        True,
+    ),
+    # Markdown-ish: **X** uses **Y**  (already covered by first pattern with case)
+]
+
+
 class KnowledgeGraphEngine:
     """
     Lightweight, in-memory & persistent GraphRAG engine powered by NetworkX.
@@ -17,7 +166,7 @@ class KnowledgeGraphEngine:
         self.storage_path = storage_path
         self.graph = nx.MultiDiGraph()
         self.load_graph()
-        
+
     def load_graph(self):
         """Load graph from JSON file or seed with initial knowledge."""
         if os.path.exists(self.storage_path):
@@ -30,7 +179,7 @@ class KnowledgeGraphEngine:
                 pass
         self._seed_default_graph()
         self.save_graph()
-        
+
     def save_graph(self):
         """Persist graph to JSON disk file."""
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
@@ -40,7 +189,7 @@ class KnowledgeGraphEngine:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"Error saving knowledge graph: {e}")
-            
+
     def _seed_default_graph(self):
         """Seed foundational project relationships."""
         seed_triples = [
@@ -53,7 +202,7 @@ class KnowledgeGraphEngine:
             ("Local Agentic RAG", "INCLUDES", "Hybrid Search RRF", {"type": "feature"}),
             ("Local Agentic RAG", "INCLUDES", "Episodic Memory", {"type": "feature"}),
             ("Local Agentic RAG", "INCLUDES", "Parallel Subagents", {"type": "feature"}),
-            
+
             # Enterprise Organization Graph
             ("Alice Smith", "LEADS", "Engineering", {"title": "Principal AI Architect"}),
             ("Alice Smith", "MANAGES", "Local AI Agent Hub", {"role": "Lead"}),
@@ -62,12 +211,12 @@ class KnowledgeGraphEngine:
             ("Charlie Brown", "LEADS", "Product", {"title": "Lead Product Manager"}),
             ("Diana Prince", "LEADS", "Marketing", {"title": "Growth Marketing Director"}),
             ("Evan Wright", "LEADS", "HR", {"title": "People Operations Lead"}),
-            
+
             ("Engineering", "HAS_BUDGET", "$1,500,000", {"currency": "USD"}),
             ("Product", "HAS_BUDGET", "$600,000", {"currency": "USD"}),
             ("Marketing", "HAS_BUDGET", "$400,000", {"currency": "USD"}),
             ("HR", "HAS_BUDGET", "$200,000", {"currency": "USD"}),
-            
+
             ("Local AI Agent Hub", "BELONGS_TO", "Engineering", {"status": "Active"}),
             ("Enterprise Semantic Search", "BELONGS_TO", "Engineering", {"status": "Completed"}),
             ("Q3 Global Marketing Push", "BELONGS_TO", "Marketing", {"status": "Active"}),
@@ -75,53 +224,82 @@ class KnowledgeGraphEngine:
         ]
         for subj, pred, obj, meta in seed_triples:
             self.add_triple(subj, pred, obj, meta, persist=False)
-            
+
     def add_triple(self, subject: str, predicate: str, object_: str, metadata: Optional[Dict[str, Any]] = None, persist: bool = True):
         """Add a directed relation triple into the Knowledge Graph."""
         s = subject.strip()
         p = predicate.strip().upper().replace(" ", "_")
         o = object_.strip()
-        
+
         if not s or not p or not o:
             return
-            
+
         if not self.graph.has_node(s):
             self.graph.add_node(s, type="entity")
         if not self.graph.has_node(o):
             self.graph.add_node(o, type="entity")
-            
+
         self.graph.add_edge(s, o, key=p, relation=p, **(metadata or {}))
         if persist:
             self.save_graph()
-            
-    def extract_and_ingest_text(self, text: str, source_doc: str = "doc"):
+
+    def extract_and_ingest_text(
+        self,
+        text: str,
+        source_doc: str = "doc",
+        max_triples: int = 40,
+    ) -> int:
         """
-        Rule-based NLP regex & pattern triple extractor for ingested documents.
-        Extracts structural definitions, leadership, dependencies, and usages.
+        Rule-based regex triple extractor with conservative entity validation.
+
+        Improvements vs the original extractor:
+        - More relations (BUILT_WITH, CREATED, LOCATED_IN, passive USES)
+        - Entity hygiene (_clean_entity / _entity_ok) to stop junk nodes
+        - Prefer proper/technical object names
+        - Per-document cap (max_triples) so ingest cannot flood the graph
+        - Deduplicates identical triples within one document
         """
-        # Patterns for common relation structures
-        patterns = [
-            # X uses / leverages / utilizes Y
-            (r"([A-Z][A-Za-z0-9_\s]{2,30})\s+(?:uses|utilizes|leverages|integrates)\s+([A-Z][A-Za-z0-9_\s]{2,30})", "USES"),
-            # X leads / manages / directs Y
-            (r"([A-Z][A-Za-z0-9_\s]{2,30})\s+(?:leads|manages|directs|heads)\s+([A-Z][A-Za-z0-9_\s]{2,30})", "LEADS"),
-            # X belongs to / part of Y
-            (r"([A-Z][A-Za-z0-9_\s]{2,30})\s+(?:belongs to|is part of|is managed by)\s+([A-Z][A-Za-z0-9_\s]{2,30})", "BELONGS_TO"),
-            # X depends on / requires Y
-            (r"([A-Z][A-Za-z0-9_\s]{2,30})\s+(?:depends on|requires|relies on)\s+([A-Z][A-Za-z0-9_\s]{2,30})", "DEPENDS_ON"),
-            # X includes / contains Y
-            (r"([A-Z][A-Za-z0-9_\s]{2,30})\s+(?:includes|contains|features)\s+([A-Z][A-Za-z0-9_\s]{2,30})", "INCLUDES"),
-            # X has budget of Y
-            (r"([A-Z][A-Za-z0-9_\s]{2,30})\s+(?:has a budget of|budget is)\s+(\$[0-9,]+)", "HAS_BUDGET")
-        ]
-        
+        if not text or not text.strip():
+            return 0
+
+        # Work on a de-hyphenated / wrapped-line flattened copy for better matches.
+        flat = re.sub(r"-\n", "", text)
+        flat = re.sub(r"\s+", " ", flat)
+
+        seen: set = set()
         extracted_count = 0
-        for pat, rel in patterns:
-            for match in re.finditer(pat, text, re.IGNORECASE):
-                subj, obj = match.group(1).strip(), match.group(2).strip()
-                if len(subj) > 2 and len(obj) > 1 and subj.lower() != obj.lower():
-                    self.add_triple(subj, rel, obj, {"source": source_doc}, persist=False)
-                    extracted_count += 1
+        for pat, rel, require_proper_obj in _KG_PATTERNS:
+            if extracted_count >= max_triples:
+                break
+            for match in re.finditer(pat, flat):
+                if extracted_count >= max_triples:
+                    break
+                subj = _clean_entity(match.group(1))
+                obj = _clean_entity(match.group(2))
+                if not _entity_ok(subj) or not _entity_ok(obj):
+                    continue
+                if subj.lower() == obj.lower():
+                    continue
+                if require_proper_obj and not _looks_like_proper_or_technical(obj):
+                    continue
+                # Subjects should at least look proper/technical when multi-token
+                if len(subj.split()) >= 2 and not _looks_like_proper_or_technical(subj):
+                    continue
+
+                key = (subj.lower(), rel, obj.lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                self.add_triple(
+                    subj,
+                    rel,
+                    obj,
+                    {"source": source_doc, "extractor": "regex_v2"},
+                    persist=False,
+                )
+                extracted_count += 1
+
         if extracted_count > 0:
             self.save_graph()
         return extracted_count

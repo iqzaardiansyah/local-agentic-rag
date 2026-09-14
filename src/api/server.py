@@ -136,6 +136,44 @@ def websearch_cache_clear() -> Dict[str, Any]:
     return {"cleared": cleared}
 
 
+@app.post("/kb/export")
+def export_kb(include_bodies: bool = True) -> Dict[str, Any]:
+    """
+    Export the knowledge base (data/ + GraphRAG + index stats) to Markdown.
+    Default output: workspace/kb_export.md
+    """
+    from src.rag.kb_export import export_knowledge_base_markdown
+
+    try:
+        return export_knowledge_base_markdown(include_file_bodies=include_bodies)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}") from e
+
+
+@app.get("/kb/export/content")
+def export_kb_content(include_bodies: bool = True) -> Dict[str, Any]:
+    """Return the KB export Markdown as JSON without writing a file (rebuilds in memory)."""
+    from src.rag import kb_export
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        "w+", suffix=".md", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp_path = tmp.name
+    try:
+        info = kb_export.export_knowledge_base_markdown(
+            output_path=tmp_path, include_file_bodies=include_bodies
+        )
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            markdown = f.read()
+        return {"info": info, "markdown": markdown}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _sse(data: Dict[str, Any], event: Optional[str] = None) -> str:
     payload = json.dumps(data, default=str)
     if event:

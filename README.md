@@ -232,6 +232,19 @@ flowchart TD
 ### 28. 🔀 Fork Session & 🔄 Regenerate Reply
 - Fork: copy history up to any message into a new session (`fork_session`).
 - Regenerate: delete the last assistant reply and re-run the last user message with full multi-turn context.
+
+### 29. 🧠 Stronger GraphRAG Triple Extraction
+- Expanded relations (`USES` incl. passive, `BUILT_WITH`, `CREATED`, `LOCATED_IN`, …).
+- Entity hygiene + stopword rejection + proper/technical preference.
+- Per-document `max_triples` cap so ingest cannot flood the graph.
+
+### 30. ⚡ Subagent Episodic Memory Injection
+- Each parallel subagent recalls top memories related to its subtask and includes them in the objective.
+- Failures never block the turn; `used_memory` flag on results.
+
+### 31. 📦 Full Knowledge Base Markdown Export
+- `src/rag/kb_export.py` bundles data/ file bodies, GraphRAG stats/triples, Chroma/BM25 stats, memory count.
+- Sidebar **Export Knowledge Base** + download; API `POST /kb/export` and `GET /kb/export/content`.
 ---
 
 ## 📁 Repository Structure
@@ -269,9 +282,10 @@ local-agentic-rag/
 │   │   ├── vectorstore.py     # ChromaDB multi-format document indexer
 │   │   ├── hybrid_search.py   # BM25 + Dense + GraphRAG Reciprocal Rank Fusion
 │   │   ├── ingest_url.py      # Webpage → data/ + Chroma + GraphRAG ingest
+│   │   ├── kb_export.py       # Full knowledge-base Markdown export
 │   │   ├── reranker.py        # Sentence-transformers Cross-Encoder
 │   │   ├── citations.py       # In-process RAG citation store
-│   │   └── graph_rag.py       # NetworkX GraphRAG knowledge graph engine
+│   │   └── graph_rag.py       # NetworkX GraphRAG + regex triple extractor v2
 │   └── tools/
 │       ├── coding_tools.py    # Sandboxed terminal, file I/O, tree, grep, slice
 │       ├── data_tools.py      # CSV/Excel pandas analysis & chart tools
@@ -384,6 +398,7 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: application/
 curl -X POST http://127.0.0.1:8000/reindex/bm25
 curl "http://127.0.0.1:8000/sources?name=README.md"
 curl "http://127.0.0.1:8000/sessions/search?q=hybrid"
+curl -X POST http://127.0.0.1:8000/kb/export
 ```
 
 SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `subagent_start`, `subagent_done`, `subagents_all_done`, `memory_capture`, `done`, `error`.

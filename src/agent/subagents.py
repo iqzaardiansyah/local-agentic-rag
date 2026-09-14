@@ -126,6 +126,33 @@ def create_subagent_runner(role: str):
     return builder.compile()
 
 
+def _episodic_brief_for_task(task: str, top_k: int = 3) -> str:
+    """
+    Pull top episodic memories related to the subtask.
+    Returns '' when nothing relevant (or store unavailable) so the agent
+    is never blocked by memory failures.
+    """
+    if not task or len(task.strip()) < 4:
+        return ""
+    try:
+        from src.memory.episodic_memory import recall_memories
+
+        mems = recall_memories(task, top_k=top_k)
+    except Exception:
+        return ""
+    if not mems:
+        return ""
+    lines = ["Long-term user/project memories relevant to this subtask:"]
+    for m in mems:
+        cat = m.get("category", "general")
+        fact = m.get("fact", "")
+        if fact:
+            lines.append(f"- [{cat}] {fact}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
+
+
 def execute_single_subagent(subtask: Dict[str, str], index: int = 0, total: int = 1) -> Dict[str, Any]:
     """Execute a single subagent task to completion and publish progress events."""
     role = subtask.get("role", "custom").lower()
@@ -146,7 +173,11 @@ def execute_single_subagent(subtask: Dict[str, str], index: int = 0, total: int 
 
     try:
         runner = create_subagent_runner(role)
-        inputs = {"messages": [HumanMessage(content=f"Subtask Objective: {task}")]}
+        objective = f"Subtask Objective: {task}"
+        brief = _episodic_brief_for_task(task)
+        if brief:
+            objective += f"\n\n{brief}\n\nPrefer user-stated preferences above when they apply."
+        inputs = {"messages": [HumanMessage(content=objective)]}
         result = runner.invoke(inputs)
 
         last_msg = result["messages"][-1]
@@ -169,6 +200,7 @@ def execute_single_subagent(subtask: Dict[str, str], index: int = 0, total: int 
             "status": "success",
             "result": output_text,
             "elapsed_ms": elapsed_ms,
+            "used_memory": bool(brief),
         }
     except Exception as e:
         elapsed_ms = round((time.perf_counter() - started) * 1000.0, 1)

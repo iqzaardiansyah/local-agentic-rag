@@ -193,6 +193,32 @@ with st.sidebar:
         st.warning("Knowledge Base wiped.")
         st.rerun()
 
+    if st.button("📦 Export Knowledge Base (Markdown)", use_container_width=True):
+        from src.rag.kb_export import export_knowledge_base_markdown
+
+        with st.spinner("Building KB export..."):
+            try:
+                res = export_knowledge_base_markdown()
+            except Exception as e:
+                res = {"success": False, "error": str(e)}
+        if res.get("success"):
+            st.success(
+                f"Exported {res['files']} file(s), {res['triples']} triples → `{res['path']}`"
+            )
+            try:
+                with open(res["path"], "rb") as f:
+                    st.download_button(
+                        "📥 Download kb_export.md",
+                        data=f.read(),
+                        file_name="kb_export.md",
+                        mime="text/markdown",
+                        use_container_width=True,
+                    )
+            except OSError:
+                pass
+        else:
+            st.error(res.get("error") or res.get("message") or "Export failed.")
+
     st.divider()
 
 
