@@ -174,6 +174,37 @@ def export_kb_content(include_bodies: bool = True) -> Dict[str, Any]:
             pass
 
 
+@app.get("/config/validate")
+def config_validate() -> Dict[str, Any]:
+    """Validate .env / LLM config without calling the model."""
+    from src.agent.config import validate_config, format_config_report
+
+    report = validate_config()
+    report["formatted"] = format_config_report(report)
+    return report
+
+
+@app.post("/sessions/{session_id}/brief")
+def export_research_brief(
+    session_id: str,
+    message_id: Optional[int] = Query(None, description="Optional assistant message id to brief"),
+) -> Dict[str, Any]:
+    """Export a research brief (question + answer + ranked sources) as Markdown."""
+    from src.memory.research_brief import build_research_brief_markdown, write_research_brief
+
+    built = build_research_brief_markdown(session_id, message_id=message_id)
+    if not built.get("success"):
+        raise HTTPException(status_code=404, detail=built.get("message", "Brief failed"))
+    # Also write to workspace for convenience
+    written = write_research_brief(session_id, message_id=message_id)
+    return {
+        "session_id": session_id,
+        "path": written.get("path"),
+        "citation_count": built.get("citation_count"),
+        "markdown": built.get("markdown"),
+    }
+
+
 def _sse(data: Dict[str, Any], event: Optional[str] = None) -> str:
     payload = json.dumps(data, default=str)
     if event:

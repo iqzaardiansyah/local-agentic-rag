@@ -74,23 +74,54 @@ def analyze_csv_summary(path: str) -> str:
 @tool
 def csv_query(path: str, expression: str) -> str:
     """
-    Run a pandas query expression against a CSV/Excel file and print the result.
-    Example expression: "age > 30 and city == 'NYC'" or "df.groupby('city')['sales'].mean()".
-    The DataFrame is available as `df`. Always return a printable result.
+    Run a **safe** pandas expression against a CSV/Excel file (no raw Python eval).
+
+    Supported styles:
+      - Row filter: "age > 30 and city == 'NYC'"
+      - Filter via columns: "df[df['sales'] > 100]"
+      - Aggregate: "df.groupby('city')['sales'].mean()"
+      - Head/sort: "df.sort_values('sales', ascending=False).head(10)"
+
+    Only a closed set of pandas methods/attributes is allowed (see safe_expr).
     Args:
         path: CSV/Excel path.
-        expression: Python expression using pandas DataFrame `df`.
+        expression: Restricted pandas expression using DataFrame `df`.
     """
+    from src.tools.safe_expr import (
+        evaluate_csv_expression,
+        SafeExpressionError,
+    )
+
     try:
         df = _load_df(path)
-        result = eval(expression, {"df": df, "pd": pd, "__builtins__": {}})  # noqa: S307 — sandboxed limited builtins
+    except Exception as e:
+        return f"Error loading CSV: {e}"
+
+    try:
+        result = evaluate_csv_expression(expression, df)
+    except SafeExpressionError as e:
+        return (
+            f"Rejected unsafe/unsupported expression: {e}\n"
+            "Allowed examples:\n"
+            "  age > 30 and city == 'NYC'\n"
+            "  df.groupby('city')['sales'].mean()\n"
+            "  df.sort_values('sales').head(10)"
+        )
+    except Exception as e:
+        return f"Error running CSV query: {e}"
+
+    try:
         if isinstance(result, pd.DataFrame):
+            if len(result) > 50:
+                return f"Result truncated to 50 of {len(result)} rows:\n{result.head(50).to_string()}"
+            return result.to_string()
+        if isinstance(result, pd.Series):
             if len(result) > 50:
                 return f"Result truncated to 50 of {len(result)} rows:\n{result.head(50).to_string()}"
             return result.to_string()
         return str(result)
     except Exception as e:
-        return f"Error running CSV query: {e}"
+        return f"Error formatting result: {e}"
 
 
 @tool

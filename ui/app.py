@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(__file__))
 
 from src.agent.graph import LLM_MODEL, LLM_BASE_URL
 from src.agent.health import check_llm_endpoint, format_health_badge
+from src.agent.config import validate_config, format_config_report
 from src.tools.coding_tools import (
     list_workspace_files,
     clean_workspace,
@@ -48,6 +49,22 @@ with st.sidebar:
 
     st.markdown(f"**🤖 Model:** `{LLM_MODEL}`")
     st.markdown(f"**🔗 Endpoint:** `{LLM_BASE_URL}`")
+
+    # --- Config / .env validation ---
+    with st.expander("🧭 Config check (.env)", expanded=False):
+        cfg = validate_config(base_url=LLM_BASE_URL, model=LLM_MODEL)
+        if cfg.get("ok") and not cfg.get("issues"):
+            st.success("Config looks valid.")
+        elif cfg.get("ok"):
+            st.success("Config valid (warnings below).")
+        else:
+            st.error(f"Config has {cfg.get('error_count', 0)} error(s).")
+        for issue in cfg.get("issues") or []:
+            if issue.get("level") == "error":
+                st.error(f"`{issue.get('key')}`: {issue.get('message')}")
+            else:
+                st.warning(f"`{issue.get('key')}`: {issue.get('message')}")
+        st.caption(f"`.env` path: `{cfg.get('env_path')}` ({'exists' if cfg.get('env_exists') else 'missing'})")
 
     # --- LLM endpoint health (cached ~30s to avoid hammering) ---
     if "llm_health" not in st.session_state or "llm_health_ts" not in st.session_state:
@@ -271,7 +288,19 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    
+
+    # Research brief download (if one was just generated)
+    brief = st.session_state.get("last_research_brief")
+    if brief and brief.get("markdown"):
+        st.download_button(
+            "📄 Download research brief (.md)",
+            data=brief["markdown"],
+            file_name=os.path.basename(brief.get("path") or "research_brief.md"),
+            mime="text/markdown",
+            use_container_width=True,
+            key="dl_research_brief",
+        )
+
     # 4. Chat Controls
     st.subheader("💬 Chat Sessions")
     all_sessions = chat_sessions.list_sessions()
@@ -573,7 +602,7 @@ with tab_chat:
                     expanded=False,
                 )
 
-            col_a, col_b = st.columns([1, 1])
+            col_a, col_b, col_c = st.columns([1, 1, 1])
             msg_db_id = message.get("id")
             with col_a:
                 if msg_db_id is not None and st.button(
@@ -611,6 +640,23 @@ with tab_chat:
                     if last_user:
                         st.session_state.regenerate_prompt = last_user
                     st.rerun()
+            with col_c:
+                if message["role"] == "assistant" and st.button(
+                    "📄 Brief",
+                    key=f"brief_{msg_idx}",
+                    help="Export this Q&A + sources as a research brief Markdown",
+                ):
+                    from src.memory.research_brief import write_research_brief
+
+                    res = write_research_brief(
+                        st.session_state.active_session_id,
+                        message_id=msg_db_id,
+                    )
+                    if res.get("success"):
+                        st.session_state.last_research_brief = res
+                        st.success(f"Brief saved to `{res.get('path')}`")
+                    else:
+                        st.error(res.get("message") or "Brief export failed.")
 
     # Handle regenerate (user message already in history; do not save user again)
     if regenerate_prompt:

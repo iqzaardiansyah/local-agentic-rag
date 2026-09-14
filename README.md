@@ -245,6 +245,19 @@ flowchart TD
 ### 31. 📦 Full Knowledge Base Markdown Export
 - `src/rag/kb_export.py` bundles data/ file bodies, GraphRAG stats/triples, Chroma/BM25 stats, memory count.
 - Sidebar **Export Knowledge Base** + download; API `POST /kb/export` and `GET /kb/export/content`.
+
+### 32. 🔒 AST-Safe CSV Queries
+- `csv_query` no longer uses raw `eval`. `src/tools/safe_expr.py` walks the AST and allows only a closed set of pandas methods/ops.
+- Rejects `__import__`, `open`, `eval`, lambdas, dunder access, etc.
+- Supports filters (`city == 'NYC'`), column locals (`df[sales > 100]`), and aggregates (`df.groupby(...)`).
+
+### 33. 🧭 Config / `.env` Validation
+- `src/agent/config.py` checks required keys, URL scheme/host, placeholders, missing API key.
+- Sidebar **Config check (.env)** expander; API `GET /config/validate`.
+
+### 34. 📄 Research Brief Export
+- Question + answer + ranked citations (+ tools/metrics) as Markdown.
+- **Brief** button on assistant messages; sidebar download; API `POST /sessions/{id}/brief`.
 ---
 
 ## 📁 Repository Structure
@@ -259,6 +272,7 @@ local-agentic-rag/
 │   └── lm-server.ipynb        # Free Kaggle/Colab GPU server with Ollama & ngrok
 ├── src/
 │   ├── agent/
+│   │   ├── config.py          # .env / LLM config validation
 │   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
 │   │   ├── health.py          # Local LLM endpoint health probe
 │   │   ├── metrics.py         # Turn metrics (TTFT, tok/s, tool latency)
@@ -273,6 +287,7 @@ local-agentic-rag/
 │   ├── memory/
 │   │   ├── auto_memory.py     # Heuristic preference capture → episodic store
 │   │   ├── chat_sessions.py   # SQLite chat session persistence + search/export
+│   │   ├── research_brief.py  # Q&A + sources → research brief Markdown
 │   │   ├── session_context.py # Multi-turn + cross-session context builder
 │   │   └── episodic_memory.py # Vector memory & sliding-window context compactor
 │   ├── mcp_server/
@@ -289,6 +304,7 @@ local-agentic-rag/
 │   └── tools/
 │       ├── coding_tools.py    # Sandboxed terminal, file I/O, tree, grep, slice
 │       ├── data_tools.py      # CSV/Excel pandas analysis & chart tools
+│       ├── safe_expr.py       # AST-safe expression evaluator for csv_query
 │       ├── git_tools.py       # Local git status/log/diff tools
 │       ├── graph_tool.py      # Knowledge graph multi-hop query tool
 │       ├── mcp_tool.py        # MCP client tools (tables, describe, query)
@@ -399,6 +415,8 @@ curl -X POST http://127.0.0.1:8000/reindex/bm25
 curl "http://127.0.0.1:8000/sources?name=README.md"
 curl "http://127.0.0.1:8000/sessions/search?q=hybrid"
 curl -X POST http://127.0.0.1:8000/kb/export
+curl http://127.0.0.1:8000/config/validate
+curl -X POST http://127.0.0.1:8000/sessions/demo-1/brief
 ```
 
 SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `subagent_start`, `subagent_done`, `subagents_all_done`, `memory_capture`, `done`, `error`.
