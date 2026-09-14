@@ -176,6 +176,21 @@ flowchart TD
 ### 16. 🧭 Git Workspace Tools
 - Agent tools: `git_status`, `git_log`, `git_diff`, `git_workspace_status`.
 - Inspect project changes without leaving the chat.
+
+### 17. 🔁 BM25 Index Freshness
+- In-process BM25 cache auto-invalidates after upload / re-index / wipe / API ingest.
+- Stale detection compares Chroma chunk count vs the BM25 build snapshot.
+- Sidebar **Rebuild BM25 Index** button + `POST /reindex/bm25`.
+
+### 18. 🪟 Windows-Safe Sandbox Shell
+- `execute_terminal_command` runs under **PowerShell** on Windows and **bash** on POSIX.
+- Uses explicit argv (no `shell=True`), UTF-8 I/O, and real exit codes for Reflexion.
+- UI default commands match the platform (`Get-Content` vs `cat`).
+
+### 19. 🩺 Live LLM Endpoint Health
+- `src/agent/health.py` pings the OpenAI-compatible `/v1/models` (with Ollama `/api/tags` fallback).
+- Sidebar shows ONLINE/OFFLINE + latency (cached ~30s) with a manual ↻ re-check.
+- `/health` returns `llm` and `bm25` status; chat warns before a turn if the endpoint is down.
 ---
 
 ## 📁 Repository Structure
@@ -191,6 +206,7 @@ local-agentic-rag/
 ├── src/
 │   ├── agent/
 │   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
+│   │   ├── health.py          # Local LLM endpoint health probe
 │   │   ├── runner.py          # Shared event-stream runner (UI + API + SSE)
 │   │   └── subagents.py       # Parallel subagent factory & dispatch engine
 │   ├── api/
@@ -317,6 +333,7 @@ curl http://127.0.0.1:8000/health
 curl -X POST http://127.0.0.1:8000/search -H "Content-Type: application/json" -d '{"query":"hybrid search","top_k":3}'
 curl -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" -d '{"message":"Summarize the local knowledge base","session_id":"demo-1"}'
 curl -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: application/json" -d '{"message":"List data files","session_id":"demo-1"}'
+curl -X POST http://127.0.0.1:8000/reindex/bm25
 curl "http://127.0.0.1:8000/sources?name=README.md"
 ```
 

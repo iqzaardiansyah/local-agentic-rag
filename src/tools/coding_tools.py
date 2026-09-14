@@ -3,7 +3,8 @@ import os
 import re
 import shutil
 import subprocess
-from typing import List
+import sys
+from typing import List, Sequence
 from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 
@@ -12,7 +13,29 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 WORKSPACE_DIR = os.path.join(ROOT_DIR, "workspace")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
+IS_WINDOWS = os.name == "nt" or sys.platform.startswith("win")
+
 repl = PythonREPL()
+
+
+def build_shell_invocation(command: str) -> Sequence[str]:
+    """
+    Build a portable argv for sandbox shell execution.
+    Windows → PowerShell (reliable exit codes + UTF-8).
+    POSIX   → bash -lc (login shell so PATH tools resolve).
+    """
+    if IS_WINDOWS:
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ]
+    return ["/bin/bash", "-lc", command]
+
 
 def get_safe_workspace_path(file_path: str) -> str:
     """Resolve paths strictly inside the sandboxed workspace directory."""
@@ -20,7 +43,7 @@ def get_safe_workspace_path(file_path: str) -> str:
         target = os.path.abspath(os.path.join(WORKSPACE_DIR, file_path))
     else:
         target = os.path.abspath(file_path)
-        
+
     # Prevent directory traversal attacks out of root or workspace
     if not (target.startswith(WORKSPACE_DIR) or target.startswith(ROOT_DIR)):
         raise PermissionError("Access denied: Target path is outside project root.")
@@ -226,23 +249,36 @@ def find_files_by_pattern(pattern: str = "*.py", path: str = ".") -> str:
 def execute_terminal_command(command: str) -> str:
     """
     Execute a shell/terminal command strictly inside the sandboxed workspace directory (./workspace).
-    Use this to run Node.js/Python scripts, build projects, or manage workspace files.
+    On Windows this runs under PowerShell; on Linux/macOS under bash. Use Python (`python script.py`)
+    for portable scripts. Use this to run Node.js/Python scripts, build projects, or manage workspace files.
     """
+    argv = build_shell_invocation(command)
+    shell_name = "PowerShell" if IS_WINDOWS else "bash"
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            argv,
+            shell=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
-            cwd=WORKSPACE_DIR
+            cwd=WORKSPACE_DIR,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
-        output = result.stdout
+        output = result.stdout or ""
         if result.stderr:
             output += f"\nErrors:\n{result.stderr}"
-        return f"Executed in ./workspace (Exit code {result.returncode}).\nOutput:\n{output}"
+        if not output.strip():
+            output = "(no output)"
+        return (
+            f"Executed in ./workspace via {shell_name} (Exit code {result.returncode}).\n"
+            f"Output:\n{output}"
+        )
     except subprocess.TimeoutExpired:
-        return "Error: Command timed out after 30 seconds."
+        return f"Error: Command timed out after 30 seconds ({shell_name})."
+    except FileNotFoundError:
+        return f"Error: {shell_name} executable not found on PATH."
     except Exception as e:
         return f"Error executing command: {str(e)}"
 

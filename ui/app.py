@@ -10,12 +10,14 @@ sys.path.append(ROOT)
 sys.path.append(os.path.dirname(__file__))
 
 from src.agent.graph import LLM_MODEL, LLM_BASE_URL
+from src.agent.health import check_llm_endpoint, format_health_badge
 from src.tools.coding_tools import (
     list_workspace_files,
     clean_workspace,
     WORKSPACE_DIR,
     write_local_file,
-    execute_terminal_command
+    execute_terminal_command,
+    IS_WINDOWS,
 )
 from src.rag.vectorstore import (
     save_and_ingest_uploaded_files,
@@ -23,6 +25,7 @@ from src.rag.vectorstore import (
     clear_vectorstore,
     reindex_all_data
 )
+from src.rag.hybrid_search import get_bm25_status, rebuild_bm25_index
 from src.rag.graph_rag import get_kg_engine
 from src.memory.episodic_memory import (
     list_all_memories,
@@ -40,21 +43,64 @@ st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wid
 # --- Sidebar: Workspace & Artifacts Controls ---
 with st.sidebar:
     st.header("⚙️ Agent & Knowledge Base")
-    
+
     st.markdown(f"**🤖 Model:** `{LLM_MODEL}`")
     st.markdown(f"**🔗 Endpoint:** `{LLM_BASE_URL}`")
+
+    # --- LLM endpoint health (cached ~30s to avoid hammering) ---
+    if "llm_health" not in st.session_state or "llm_health_ts" not in st.session_state:
+        st.session_state.llm_health = None
+        st.session_state.llm_health_ts = 0.0
+
+    col_h1, col_h2 = st.columns([3, 1])
+    with col_h1:
+        age = time.time() - st.session_state.llm_health_ts
+        if st.session_state.llm_health is None or age > 30:
+            with st.spinner("Checking LLM endpoint..."):
+                st.session_state.llm_health = check_llm_endpoint(LLM_BASE_URL)
+                st.session_state.llm_health_ts = time.time()
+        hh = st.session_state.llm_health or {}
+        if hh.get("ok"):
+            st.success(format_health_badge(hh))
+        else:
+            st.error(format_health_badge(hh))
+            st.caption("Start Ollama / your ngrok notebook, then hit ↻.")
+    with col_h2:
+        if st.button("↻", key="recheck_llm", help="Re-check LLM endpoint"):
+            st.session_state.llm_health = check_llm_endpoint(LLM_BASE_URL)
+            st.session_state.llm_health_ts = time.time()
+            st.rerun()
+
     st.divider()
-    
+
     # 1. Document Upload & Knowledge Base Management
     st.subheader("📚 Knowledge Base Manager")
     kb_stats = get_knowledge_base_stats()
     kg_stats = get_kg_engine().get_graph_stats()
-    
+    bm25_stats = get_bm25_status()
+
     col_k1, col_k2 = st.columns(2)
     col_k1.metric("Chroma Chunks", kb_stats["total_chunks"])
     col_k2.metric("KG Entities", kg_stats["total_entities"])
-    
+
     st.caption(f"🕸️ **GraphRAG:** `{kg_stats['total_relationships']}` relational triples indexed.")
+
+    bm25_state = "fresh" if not bm25_stats.get("stale") else "stale"
+    bm25_color = "🟢" if bm25_state == "fresh" else "🟡"
+    st.caption(
+        f"{bm25_color} **BM25:** {bm25_stats.get('documents', 0)} docs "
+        f"(chroma={bm25_stats.get('chroma_count', '?')}) · {bm25_state}"
+    )
+    if bm25_stats.get("stale") and bm25_stats.get("reason"):
+        st.caption(f"Reason: {bm25_stats['reason']}")
+    if st.button("🔁 Rebuild BM25 Index", use_container_width=True):
+        with st.spinner("Rebuilding BM25 from Chroma..."):
+            res = rebuild_bm25_index()
+        if res.get("ok"):
+            st.success(f"BM25 rebuilt from {res.get('documents')} chunks.")
+        else:
+            st.error(f"BM25 rebuild failed: {res.get('error')}")
+        st.rerun()
     
     with st.expander("📤 Upload & Ingest Documents", expanded=False):
         uploaded_files = st.file_uploader(
@@ -256,6 +302,14 @@ with tab_chat:
             status_closed = False
 
             try:
+                # Fail fast if the LLM endpoint is down (still allow the attempt).
+                hh = st.session_state.get("llm_health") or {}
+                if not hh.get("ok"):
+                    st.warning(
+                        "LLM endpoint looks offline. The agent may fail. "
+                        "Check Ollama / ngrok in the sidebar (↻)."
+                    )
+
                 # Session-aware multi-turn: history + cross-session brief + episodic recall
                 agent_messages = build_agent_messages(
                     prompt,
@@ -479,7 +533,10 @@ with tab_workbench:
             
             custom_cmd = st.text_input(
                 "Terminal Command:",
-                value=f"python {selected_file}" if ext == "py" else f"cat {selected_file}",
+                value=(
+                    f"python {selected_file}" if ext == "py"
+                    else (f"Get-Content {selected_file}" if IS_WINDOWS else f"cat {selected_file}")
+                ),
                 key="runner_custom_cmd"
             )
             

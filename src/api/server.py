@@ -83,15 +83,30 @@ class IngestRequest(BaseModel):
 @app.get("/health")
 def health() -> Dict[str, Any]:
     from src.agent.graph import LLM_BASE_URL, LLM_MODEL
+    from src.agent.health import check_llm_endpoint
+    from src.rag.hybrid_search import get_bm25_status
 
+    llm = check_llm_endpoint(LLM_BASE_URL)
+    bm25 = get_bm25_status()
     return {
-        "status": "ok",
+        "status": "ok" if llm["ok"] else "degraded",
         "model": LLM_MODEL,
         "base_url": LLM_BASE_URL,
+        "llm": llm,
+        "bm25": bm25,
         "cost": 0,
         "requires_credit_card": False,
         "streaming": "/chat/stream",
     }
+
+
+@app.post("/reindex/bm25")
+def reindex_bm25() -> Dict[str, Any]:
+    """Force a BM25 rebuild from the current Chroma collection (free, local)."""
+    from src.rag.hybrid_search import rebuild_bm25_index, get_bm25_status
+
+    result = rebuild_bm25_index()
+    return {"result": result, "status": get_bm25_status()}
 
 
 def _sse(data: Dict[str, Any], event: Optional[str] = None) -> str:
@@ -353,6 +368,12 @@ def ingest(req: IngestRequest) -> Dict[str, Any]:
     chunks = splitter.split_documents(docs)
     vs = get_vectorstore()
     vs.add_documents(chunks)
+    try:
+        from src.rag.hybrid_search import invalidate_bm25_index
+
+        invalidate_bm25_index()
+    except Exception:
+        pass
     return {"success": True, "source": safe_name, "path": dest, "chunks": len(chunks)}
 
 

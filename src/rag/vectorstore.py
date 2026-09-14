@@ -67,30 +67,41 @@ def load_file_content(file_path: str) -> List[Document]:
         print(f"Error loading {file_path}: {e}")
         return []
 
+def _notify_kb_changed() -> None:
+    """Keep the in-process BM25 cache in sync after Chroma mutations."""
+    try:
+        from src.rag.hybrid_search import invalidate_bm25_index
+
+        invalidate_bm25_index()
+    except Exception:
+        pass
+
+
 def save_and_ingest_uploaded_files(uploaded_files) -> Dict[str, Any]:
     """Save uploaded Streamlit files to data/ and index them into ChromaDB."""
     os.makedirs(DATA_DIR, exist_ok=True)
     saved_files = []
     all_documents = []
-    
+
     for uf in uploaded_files:
         save_path = os.path.join(DATA_DIR, uf.name)
         with open(save_path, "wb") as f:
             f.write(uf.getbuffer())
         saved_files.append(uf.name)
-        
+
         docs = load_file_content(save_path)
         all_documents.extend(docs)
-        
+
     if not all_documents:
         return {"success": False, "message": "No document content extracted.", "chunks": 0}
-        
+
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(all_documents)
-    
+
     vectorstore = get_vectorstore()
     vectorstore.add_documents(chunks)
-    
+    _notify_kb_changed()
+
     return {
         "success": True,
         "saved_files": saved_files,
@@ -127,33 +138,37 @@ def clear_vectorstore():
             vs._collection.delete(ids=all_ids)
     except Exception as e:
         print(f"Note on Chroma collection reset: {e}")
-        
+
     if os.path.exists(CHROMA_DB_DIR):
         try:
             shutil.rmtree(CHROMA_DB_DIR, ignore_errors=True)
             os.makedirs(CHROMA_DB_DIR, exist_ok=True)
         except Exception:
             pass
+    _notify_kb_changed()
 
 
 def reindex_all_data() -> int:
     """Re-reads everything in data/ and builds a fresh ChromaDB index."""
     clear_vectorstore()
     if not os.path.exists(DATA_DIR):
+        _notify_kb_changed()
         return 0
     all_docs = []
     for f in os.listdir(DATA_DIR):
         fpath = os.path.join(DATA_DIR, f)
         if os.path.isfile(fpath):
             all_docs.extend(load_file_content(fpath))
-            
+
     if not all_docs:
+        _notify_kb_changed()
         return 0
-        
+
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(all_docs)
     vectorstore = get_vectorstore()
     vectorstore.add_documents(chunks)
+    _notify_kb_changed()
     return len(chunks)
 
 def ingest_documents():

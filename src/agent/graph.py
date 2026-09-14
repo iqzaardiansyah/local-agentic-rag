@@ -171,6 +171,11 @@ Git Workspace Tools (free, local):
 - Use `git_status`, `git_log`, and `git_diff` to inspect the project repository.
 - Use `git_workspace_status` to check the sandbox if it is a git repo.
 
+Sandbox Shell Notes:
+- On Windows, `execute_terminal_command` runs under PowerShell (not bash). Prefer portable
+  commands (`python script.py`, `dir`, `Get-Content`) over Unix-only tools (`cat`, `ls`, `grep`).
+- On Linux/macOS the same tool runs under bash.
+
 Always answer accurately based on the information returned by the tools.
 If you don't know the answer even after searching, say you don't know.
 """
