@@ -1,8 +1,5 @@
 """
-Full knowledge-base Markdown export. Free, local.
-
-Combines data/ files, GraphRAG stats + top triples, Chroma/BM25 stats,
-and episodic memory count into one downloadable report.
+Export the knowledge base to Markdown: data/ files, GraphRAG stats, index stats.
 """
 
 from __future__ import annotations

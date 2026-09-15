@@ -1,4 +1,4 @@
-"""Offline RAG evaluation harness. Fully local, free, no paid APIs."""
+"""Offline RAG evaluation (Hit@k, MRR, keyword rate)."""
 
 import json
 import os

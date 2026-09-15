@@ -18,7 +18,7 @@ os.makedirs(CHROMA_DB_DIR, exist_ok=True)
 _embeddings = None
 
 def get_embeddings():
-    """Returns singleton local HuggingFace embeddings to keep it free and fast."""
+    """Returns singleton HuggingFace embeddings."""
     global _embeddings
     if _embeddings is None:
         _embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")

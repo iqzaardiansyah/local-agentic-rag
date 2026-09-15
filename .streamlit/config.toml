@@ -1,0 +1,6 @@
+# Avoids Streamlit file-watcher noise from optional transformers deps.
+[server]
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false

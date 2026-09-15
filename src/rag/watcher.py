@@ -1,8 +1,6 @@
 """
-Lightweight data/ directory watcher for KB freshness. Free, local.
-
-Fingerprints file names + size + mtime. No watchdog dependency —
-safe for Streamlit reruns and API calls. Optional auto-reindex.
+Fingerprint data/ (name, size, mtime) so the KB can detect stale indexes.
+No extra dependency; optional auto-reindex.
 """
 
 from __future__ import annotations

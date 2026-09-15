@@ -1,9 +1,6 @@
 """
-Session-aware multi-turn context builder.
-
-Shared by the Streamlit UI and the FastAPI API so both send the same
-agent input: within-session history + cross-session brief + episodic recall.
-All local / free.
+Build agent input: within-session history + cross-session brief + episodic recall.
+Shared by the Streamlit UI and FastAPI API.
 """
 
 from __future__ import annotations

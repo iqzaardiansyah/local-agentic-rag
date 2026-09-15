@@ -1,8 +1,4 @@
-"""
-Local .env / runtime config validation. Free, no cloud calls.
-
-Surfaces missing keys, bad URLs, and placeholder values before a long agent turn.
-"""
+"""Validate .env / LLM runtime configuration."""
 
 from __future__ import annotations
 

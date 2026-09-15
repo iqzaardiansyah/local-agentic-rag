@@ -1,20 +1,7 @@
 """
-Free local FastAPI REST API for Local Agentic RAG.
+FastAPI REST API for Local Agentic RAG.
 
-Run:
-  uvicorn src.api.server:app --host 127.0.0.1 --port 8000
-
-No cloud keys required — talks to your local/ngrok Ollama endpoint only.
-
-Endpoints:
-  GET  /health
-  POST /chat           — full turn (session-aware multi-turn) + citations
-  POST /chat/stream    — Server-Sent Events stream (tokens, tools, citations)
-  POST /search         — hybrid RAG only
-  POST /ingest         — push text into Chroma
-  GET  /sessions
-  GET  /sessions/{id}/export
-  GET  /sources        — resolve + preview a citation source file
+Run: uvicorn src.api.server:app --host 127.0.0.1 --port 8000
 """
 
 from __future__ import annotations
@@ -38,7 +25,7 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
 app = FastAPI(
     title="Local Agentic RAG API",
-    description="Free, local REST API for chat, RAG search, and document ingestion.",
+    description="Chat, RAG search, and document ingestion.",
     version="1.1.0",
 )
 
@@ -112,7 +99,7 @@ def health() -> Dict[str, Any]:
 
 @app.post("/reindex/bm25")
 def reindex_bm25() -> Dict[str, Any]:
-    """Force a BM25 rebuild from the current Chroma collection (free, local)."""
+    """Force a BM25 rebuild from the current Chroma collection."""
     from src.rag.hybrid_search import rebuild_bm25_index, get_bm25_status
 
     result = rebuild_bm25_index()
@@ -294,6 +281,10 @@ def _stream_chat_events(req: ChatRequest) -> Iterator[str]:
             )
         elif etype == "token":
             yield _sse({"type": "token", "token": event.get("token", "")}, event="token")
+        elif etype == "thinking":
+            yield _sse({"type": "thinking", "token": event.get("token", "")}, event="thinking")
+        elif etype == "heartbeat":
+            yield _sse(event, event="heartbeat")
         elif etype == "tool_call":
             yield _sse(
                 {
@@ -522,7 +513,7 @@ def ingest(req: IngestRequest) -> Dict[str, Any]:
 
 @app.post("/ingest/url")
 def ingest_url(req: IngestUrlRequest) -> Dict[str, Any]:
-    """Scrape a webpage and index it into Chroma + GraphRAG (free, local)."""
+    """Scrape a webpage and index it into Chroma + GraphRAG."""
     from src.rag.ingest_url import ingest_url_to_kb
 
     try:

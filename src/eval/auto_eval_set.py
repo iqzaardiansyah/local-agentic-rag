@@ -1,9 +1,4 @@
-"""
-Auto-generate offline RAG eval cases from files in data/.
-
-Derives queries from headings / distinctive sentences so Hit@k and MRR can be
-measured without hand-writing JSON. Free / local.
-"""
+"""Generate RAG eval cases from headings/sentences/keywords in data/."""
 
 from __future__ import annotations
 

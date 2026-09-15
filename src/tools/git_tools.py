@@ -1,4 +1,4 @@
-"""Free local git tools for project and sandbox inspection."""
+"""Git status/log/diff tools for the project and workspace."""
 
 import os
 import subprocess

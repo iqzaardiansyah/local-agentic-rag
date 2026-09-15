@@ -1,4 +1,4 @@
-"""Free local CSV / tabular data analysis tools for the agent sandbox."""
+"""CSV / tabular analysis tools for the agent sandbox."""
 
 import os
 from typing import List

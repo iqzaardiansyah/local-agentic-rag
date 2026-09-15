@@ -1,9 +1,4 @@
-"""
-Auto-capture durable user preferences into episodic memory after a turn.
-
-Heuristic (free, local, no extra LLM call by default). Optional tiny local
-LLM extraction can be enabled later; heuristics keep latency ~0 and offline-safe.
-"""
+"""Heuristic capture of durable user preferences into episodic memory."""
 
 from __future__ import annotations
 

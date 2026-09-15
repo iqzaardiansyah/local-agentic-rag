@@ -1,4 +1,4 @@
-"""SQLite-backed chat session persistence. Free, local, no external services."""
+"""SQLite-backed chat session persistence."""
 
 import json
 import os

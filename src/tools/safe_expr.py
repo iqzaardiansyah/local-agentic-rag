@@ -1,8 +1,5 @@
 """
-AST-safe expression evaluation for csv_query.
-
-No raw eval/exec. Only a closed set of pandas DataFrame/Series operations
-and comparison/filter syntax is allowed. Free / local.
+AST-safe evaluation for csv_query: closed set of pandas ops, no raw eval/exec.
 """
 
 from __future__ import annotations

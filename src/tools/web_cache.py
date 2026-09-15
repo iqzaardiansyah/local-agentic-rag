@@ -1,6 +1,4 @@
-"""
-Local TTL cache for DuckDuckGo web_search results. Free, SQLite-backed.
-"""
+"""SQLite TTL cache for web_search results."""
 
 from __future__ import annotations
 

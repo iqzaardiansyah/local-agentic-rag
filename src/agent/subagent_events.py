@@ -1,8 +1,8 @@
 """
-Thread-safe observer bus for parallel subagent progress.
+Observer bus for parallel subagent progress.
 
-The LangGraph tool node only returns after `spawn_parallel_subagents` finishes,
-so live UI/SSE progress is published through this side channel. Free / local.
+LangGraph only returns from spawn_parallel_subagents after all workers finish;
+this side channel publishes live start/done events to the UI/SSE.
 """
 
 from __future__ import annotations

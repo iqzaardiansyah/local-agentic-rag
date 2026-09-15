@@ -1,9 +1,4 @@
-"""
-Free local LLM endpoint health checks (OpenAI-compatible / Ollama).
-
-Used by the Streamlit sidebar and FastAPI /health so failures surface
-before a long agent turn. No cloud services.
-"""
+"""LLM endpoint health checks (OpenAI-compatible / Ollama)."""
 
 from __future__ import annotations
 

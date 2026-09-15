@@ -1,7 +1,4 @@
-"""
-Export a chat turn (or full session) as a research brief: answer + ranked sources.
-Free, local Markdown.
-"""
+"""Export a chat turn as Markdown: question, answer, and ranked sources."""
 
 from __future__ import annotations
 

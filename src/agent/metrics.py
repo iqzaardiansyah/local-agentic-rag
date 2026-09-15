@@ -1,8 +1,4 @@
-"""
-Free local run metrics for agent turns (tool latency, tokens/sec, wall time).
-
-Collected by the runner and surfaced in UI + API. No external services.
-"""
+"""Per-turn metrics: wall time, TTFT, token rate, tool latency."""
 
 from __future__ import annotations
 
