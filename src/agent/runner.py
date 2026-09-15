@@ -1,8 +1,6 @@
 """
-Shared agent turn runner used by Streamlit and the FastAPI SSE endpoint.
-
-Yields typed events so UIs can render tokens, tool calls, subagent progress,
-and citations with one code path. Free / local only.
+Shared agent turn runner for Streamlit and FastAPI SSE.
+Yields token, tool, subagent, and citation events on one code path.
 """
 
 from __future__ import annotations
@@ -24,6 +22,32 @@ from src.agent.subagent_events import (
 _SENTINEL = object()
 
 
+def _chunk_content_text(chunk: Any) -> str:
+    c = getattr(chunk, "content", None)
+    if c is None:
+        return ""
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        parts = []
+        for part in c:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+        return "".join(parts)
+    return str(c)
+
+
+def _chunk_reasoning_text(chunk: Any) -> str:
+    ak = getattr(chunk, "additional_kwargs", None) or {}
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        val = ak.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return ""
+
+
 def run_agent_stream(
     user_message: str,
     session_id: Optional[str] = None,
@@ -32,19 +56,11 @@ def run_agent_stream(
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Stream one agent turn as event dicts:
-
-      {"type": "meta", "session_id": ..., "model": ...}
-      {"type": "tool_call", "tool": ..., "args": ...}
-      {"type": "token", "token": "..."}
-      {"type": "tool_result", "tool": ..., "output": ...}
-      {"type": "grade", "label": "...", "detail": "..."}
-      {"type": "subagent_start"|"subagent_done"|"subagents_all_done", ...}
-      {"type": "done", "answer": ..., "steps": [...], "citations": [...]}
-      {"type": "error", "error": "..."}
-
-    The graph runs on a worker thread so parallel-subagent progress events can
-    interleave live with token/tool events on this generator.
+    meta, heartbeat, tool_call, token, thinking, tool_result, grade,
+    subagent_*, done, error.
     """
+    import time as _time
+
     from src.agent.graph import LLM_BASE_URL, LLM_MODEL, app as agent_app
 
     clear_citations()
@@ -55,6 +71,9 @@ def run_agent_stream(
     metrics = TurnMetrics()
     # Map tool_call_id → tool name for latency pairing
     call_id_to_tool: Dict[str, str] = {}
+    started = _time.perf_counter()
+    last_visible_at = started
+    last_reasoning = ""
 
     def _observer(event: Dict[str, Any]) -> None:
         # Called from subagent worker threads.
@@ -62,8 +81,18 @@ def run_agent_stream(
 
     register_subagent_observer(_observer)
 
+    def _heartbeat(phase: str) -> None:
+        nonlocal last_visible_at
+        now = _time.perf_counter()
+        last_visible_at = now
+        out_q.put({
+            "type": "heartbeat",
+            "phase": phase,
+            "elapsed_ms": round((now - started) * 1000.0, 1),
+        })
+
     def _worker() -> None:
-        nonlocal final_response
+        nonlocal final_response, last_reasoning
         try:
             if history is not None:
                 messages: List[BaseMessage] = list(history)
@@ -81,6 +110,7 @@ def run_agent_stream(
                 "base_url": LLM_BASE_URL,
                 "message_count": len(messages),
             })
+            _heartbeat("starting")
 
             inputs = {"messages": messages}
 
@@ -88,8 +118,9 @@ def run_agent_stream(
                 node_name = (meta or {}).get("langgraph_node", "")
 
                 if node_name == "agent":
-                    if hasattr(chunk, "tool_calls") and chunk.tool_calls:
-                        for tc in chunk.tool_calls:
+                    tool_calls = getattr(chunk, "tool_calls", None) or []
+                    if tool_calls:
+                        for tc in tool_calls:
                             call_id = tc.get("id") or str(tc)
                             if call_id in registered_calls:
                                 continue
@@ -101,13 +132,26 @@ def run_agent_stream(
                             tool_steps.append(
                                 {"type": "call", "tool": tool_name, "args": tool_args}
                             )
+                            _heartbeat("tool_call")
                             out_q.put({
                                 "type": "tool_call",
                                 "tool": tool_name,
                                 "args": tool_args,
                             })
-                    elif getattr(chunk, "content", None):
-                        token = chunk.content
+
+                    reasoning = _chunk_reasoning_text(chunk)
+                    if reasoning:
+                        if last_reasoning and reasoning.startswith(last_reasoning):
+                            delta = reasoning[len(last_reasoning):]
+                        else:
+                            delta = reasoning
+                        last_reasoning = reasoning
+                        if delta:
+                            metrics.mark_token(delta)
+                            out_q.put({"type": "thinking", "token": delta})
+
+                    token = _chunk_content_text(chunk)
+                    if token:
                         final_response += token
                         metrics.mark_token(token)
                         out_q.put({"type": "token", "token": token})
@@ -127,6 +171,7 @@ def run_agent_stream(
                                 "output": tool_content[:2000],
                             }
                         )
+                        _heartbeat("tool_result")
                         out_q.put({
                             "type": "tool_result",
                             "tool": tool_name,
@@ -146,10 +191,25 @@ def run_agent_stream(
                                 "detail": detail,
                             })
 
+                # Stall heartbeat during long silent phases
+                now = _time.perf_counter()
+                if now - last_visible_at > 3.0:
+                    phase = "tools" if tool_steps else "thinking"
+                    _heartbeat(phase)
+
             citations = get_citations()
+            answer = final_response
+            if not answer.strip() and tool_steps:
+                called = [s.get("tool") for s in tool_steps if s.get("type") == "call"]
+                uniq = list(dict.fromkeys(called))
+                answer = (
+                    "Finished with tool activity but no text summary. Tools: "
+                    + ", ".join(f"`{t}`" for t in uniq[:12])
+                    + f" ({len(tool_steps)} steps). See ./workspace for artifacts."
+                )
             out_q.put({
                 "type": "done",
-                "answer": final_response,
+                "answer": answer,
                 "steps": tool_steps,
                 "citations": citations,
                 "metrics": metrics.snapshot(),

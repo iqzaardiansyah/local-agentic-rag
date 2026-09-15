@@ -67,11 +67,28 @@ ROLE_TOOLS = {
 
 
 ROLE_PROMPTS = {
-    "researcher": "You are a specialized Research Subagent. Your mission is to gather accurate facts and summarize findings using search and scraping tools. Be factual and concise.",
-    "coder": "You are a specialized Coding & Software Engineering Subagent. Your mission is to write, inspect, and test code strictly inside the ./workspace sandbox.",
-    "data_analyst": "You are a specialized Data Analyst Subagent. Your mission is to query databases, analyze tabular data, perform math in Python, and produce clear insights.",
-    "rag_specialist": "You are a specialized Knowledge Base Subagent. Your mission is to search internal documents, verify retrieved facts, and extract relevant knowledge.",
-    "custom": "You are an autonomous Task Subagent. Focus on solving the specific objective given to you using the available tools."
+    "researcher": (
+        "You are a Research Subagent. Gather facts with search/scrape tools "
+        "and return a short structured brief."
+    ),
+    "coder": (
+        "You are a Coding Subagent working only in the project sandbox.\n"
+        "- Write files with write_local_file using sandbox-relative paths "
+        "(e.g. `todo_app/app.py`) — never `workspace/todo_app/app.py`.\n"
+        "- Work in phases; run a quick check (py_compile/pytest/python script) after writing.\n"
+        "- Finish with a brief summary of files and how to run them."
+    ),
+    "data_analyst": (
+        "You are a Data Analyst Subagent. Query data, compute stats in Python, "
+        "and return compact insights."
+    ),
+    "rag_specialist": (
+        "You are a Knowledge Base Subagent. Search internal docs and return a tight summary."
+    ),
+    "custom": (
+        "You are a Task Subagent. Solve only the assigned objective. "
+        "Prefer tools over long prose; if coding, write files incrementally and test."
+    ),
 }
 
 class SubagentState(TypedDict):
@@ -79,19 +96,17 @@ class SubagentState(TypedDict):
 
 def create_subagent_runner(role: str):
     """Factory to build an isolated single-loop subagent execution graph."""
-    llm_base_url = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
-    llm_model = os.getenv("LLM_MODEL", "qwen3.8:27b")
-    llm_api_key = os.getenv("LLM_API_KEY", "ollama")
-    
+    from src.agent.llm_config import load_llm_settings, extra_body_from_settings
+
+    cfg = load_llm_settings()
     subagent_llm = ChatOpenAI(
-        model=llm_model,
-        base_url=llm_base_url,
-        api_key=llm_api_key,
-        temperature=0.4,
-        extra_body={
-            "reasoning_effort": "high",
-            "thinking": {"type": "enabled", "budget_tokens": 8192}
-        }
+        model=cfg["model"],
+        base_url=cfg["base_url"],
+        api_key=cfg["api_key"],
+        temperature=cfg["subagent_temperature"],
+        streaming=True,
+        max_tokens=cfg["subagent_max_tokens"],
+        extra_body=extra_body_from_settings(cfg),
     )
     
     tools = ROLE_TOOLS.get(role, ROLE_TOOLS["custom"])
@@ -269,20 +284,15 @@ def run_subagents_parallel(subtasks: List[Dict[str, str]], max_workers: int = 4)
 @tool
 def spawn_parallel_subagents(subtasks: List[Dict[str, str]]) -> str:
     """
-    Spawn up to 4 specialized subagents to execute independent subtasks concurrently in parallel.
-    Takes full advantage of multi-slot GPU inference (OLLAMA_NUM_PARALLEL=4).
-    
-    Args:
-        subtasks: A list of dicts with keys:
-            - 'role': One of ['researcher', 'coder', 'data_analyst', 'rag_specialist', 'custom']
-            - 'task': Detailed prompt describing what this subagent should investigate or do.
-            - 'name': (Optional) A descriptive label for this subagent.
-            
+    Run up to 4 specialized subagents in parallel (researcher, coder, data_analyst,
+    rag_specialist, custom). Use for multi-step builds or work that would overflow
+    one agent context. Keep each subtask small and file-oriented.
+
     Example:
         spawn_parallel_subagents(subtasks=[
-            {"role": "researcher", "task": "Search for latest developments on LangGraph v0.2"},
-            {"role": "data_analyst", "task": "Query employee database for Engineering department staff"},
-            {"role": "rag_specialist", "task": "Search local documents for project requirements"}
+            {"role": "researcher", "task": "List requirements and file layout for a Flask todo API"},
+            {"role": "coder", "task": "Create todo_app/app.py skeleton only"},
+            {"role": "coder", "task": "Create todo_app/tests/test_app.py with 3 pytest cases"}
         ])
     """
     if not subtasks:

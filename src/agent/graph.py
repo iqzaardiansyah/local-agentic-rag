@@ -122,21 +122,24 @@ tools = [
 ]
 tool_node = ToolNode(tools)
 
-# 3. Initialize LLM with xhigh thinking / reasoning mode
-# We use ChatOpenAI because Ollama supports OpenAI API format.
-# extra_body passes reasoning_effort and thinking parameters down to Ollama/vLLM endpoints.
+# 3. Initialize LLM (all knobs come from .env via llm_config)
+from src.agent.llm_config import load_llm_settings, extra_body_from_settings
+
+_LLM = load_llm_settings()
+LLM_ENABLE_THINKING = _LLM["enable_thinking"]
+LLM_THINKING_BUDGET = _LLM["thinking_budget"]
+LLM_MAX_TOKENS = _LLM["max_tokens"]
+LLM_TEMPERATURE = _LLM["temperature"]
+
 llm = ChatOpenAI(
-    model=LLM_MODEL,
-    base_url=LLM_BASE_URL,
-    api_key=LLM_API_KEY,
-    temperature=0.6,
-    extra_body={
-        "reasoning_effort": "xhigh",
-        "thinking": {
-            "type": "enabled",
-            "budget_tokens": 32768
-        }
-    }
+    model=_LLM["model"],
+    base_url=_LLM["base_url"],
+    api_key=_LLM["api_key"],
+    temperature=_LLM["temperature"],
+    top_p=_LLM["top_p"],
+    streaming=True,
+    max_tokens=_LLM["max_tokens"],
+    extra_body=extra_body_from_settings(_LLM),
 )
 
 # Bind tools to the LLM
@@ -158,6 +161,12 @@ Parallel Subagent Capabilities:
 - When a user request is complex, comparative, or multi-faceted (e.g. 'Compare X and Y, analyze DB records for Z, and test code for W'), you can use `spawn_parallel_subagents` to delegate up to 4 independent subtasks to run in parallel simultaneously across Ollama's 4 concurrent GPU slots.
 - Available subagent roles: 'researcher', 'coder', 'data_analyst', 'rag_specialist', 'custom'.
 
+Software Builds & Multi-Step Work:
+- Do not implement a full multi-file app in one message. Split work and use tools.
+- For "build an app": short plan → `spawn_parallel_subagents` in phases (skeleton, feature, tests) → short status.
+- Coder subtasks must `write_local_file` one small file per call. Paths are relative to the sandbox root (`app.py`, `pkg/mod.py`) — never write `workspace/app.py`.
+- Final reply: what was built, where files live, how to run — not the full source dump.
+
 MCP Database Introspection & Querying:
 - Use `mcp_list_tables` to discover all tables in the SQLite database and see their record counts.
 - Use `mcp_describe_table` to inspect column names, types, primary keys, and foreign keys before writing queries.
@@ -175,22 +184,20 @@ Direct Coding & Workspace Tools:
 - Use `find_files_by_pattern` to find files by glob (e.g. `*.py`, `*.json`).
 - Use `execute_python_code` to perform calculations, data analysis, or test logic locally. ALWAYS print() results.
 - Use `execute_terminal_command` to execute bash/shell commands, run Node.js/C++/Go code, run tests, or manage workspace.
-- Use `read_local_file` and `write_local_file` to inspect files and create/modify code safely inside the `./workspace` sandbox.
+- Use `read_local_file` and `write_local_file` to inspect files and create/modify code inside the sandbox (paths like `app.py` or `pkg/mod.py`, not `workspace/...`).
 
-CSV / Tabular Data (free, local pandas):
+CSV / Tabular Data:
 - Use `list_data_files` to discover CSV/Excel files in data/ or workspace/.
 - Use `analyze_csv_summary` for shape, dtypes, nulls, and describe stats.
 - Use `csv_query` for pandas expressions (df is available) and `csv_groupby` for aggregations.
 - Use `save_csv_chart` to render line/bar/scatter/hist charts into workspace.
 
-Git Workspace Tools (free, local):
+Git Workspace Tools:
 - Use `git_status`, `git_log`, and `git_diff` to inspect the project repository.
 - Use `git_workspace_status` to check the sandbox if it is a git repo.
 
 Sandbox Shell Notes:
-- On Windows, `execute_terminal_command` runs under PowerShell (not bash). Prefer portable
-  commands (`python script.py`, `dir`, `Get-Content`) over Unix-only tools (`cat`, `ls`, `grep`).
-- On Linux/macOS the same tool runs under bash.
+- `execute_terminal_command` runs under PowerShell on Windows and bash on Linux/macOS.
 
 Always answer accurately based on the information returned by the tools.
 If you don't know the answer even after searching, say you don't know.
@@ -210,8 +217,8 @@ def agent_node(state: AgentState):
     if not has_main_prompt:
         messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
 
-    # Apply hierarchical context compaction (sliding window + running summary)
-    compacted_messages = compact_messages_window(messages, max_recent=8)
+    # Keep the recent window small: system prompt + tool schemas already use several thousand tokens.
+    compacted_messages = compact_messages_window(messages, max_recent=6)
 
     # Guard to prevent "no user query found in messages" errors in Qwen/Ollama chat templates
     has_user = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in compacted_messages)

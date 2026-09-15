@@ -433,6 +433,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
     tool_steps = []
     clear_citations()
     last_metrics = {}
+    slow_wait_warned = False
 
     status_box = st.status("🤖 Agent is analyzing & executing...", expanded=True)
     response_placeholder = st.empty()
@@ -483,8 +484,49 @@ def _run_agent_turn_ui(prompt: str) -> None:
                         expanded=False,
                     )
                     status_closed = True
+                elif not status_closed:
+                    status_box.update(
+                        label="✍️ Streaming answer...",
+                        state="running",
+                        expanded=True,
+                    )
                 final_response += event.get("token", "")
                 response_placeholder.markdown(final_response + "▌")
+
+            elif etype == "thinking":
+                with status_box:
+                    st.caption("💭 " + (event.get("token") or "")[:200])
+
+            elif etype == "heartbeat":
+                phase = event.get("phase", "working")
+                elapsed = event.get("elapsed_ms", 0)
+                from src.agent.graph import LLM_ENABLE_THINKING
+
+                if phase == "starting":
+                    label = f"🤖 Starting agent... ({elapsed} ms)"
+                elif phase in ("thinking", "tools") and not tool_steps and not final_response:
+                    if LLM_ENABLE_THINKING:
+                        label = f"💭 Model thinking... ({elapsed} ms)"
+                    else:
+                        label = f"⏳ Waiting for first token... ({elapsed} ms)"
+                elif phase in ("tools", "tool_call", "tool_result"):
+                    label = f"🛠️ Tools in progress... ({elapsed} ms)"
+                else:
+                    label = f"⏳ Working... ({elapsed} ms)"
+                if not status_closed:
+                    status_box.update(label=label, state="running", expanded=True)
+                    if (
+                        not slow_wait_warned
+                        and elapsed > 30000
+                        and not final_response
+                        and not tool_steps
+                    ):
+                        slow_wait_warned = True
+                        with status_box:
+                            st.caption(
+                                "Remote model is still generating. Large tool lists + a "
+                                "27B model over ngrok can take a while."
+                            )
 
             elif etype == "tool_result":
                 tool_name = event.get("tool", "tool")
@@ -564,8 +606,16 @@ def _run_agent_turn_ui(prompt: str) -> None:
         citations = get_citations()
         if final_response:
             response_placeholder.markdown(final_response)
+        elif tool_steps:
+            response_placeholder.markdown(
+                f"**Tools ran but there is no final summary** ({len(tool_steps)} steps). "
+                "See the tool trace above and `./workspace`."
+            )
         else:
-            st.warning("Agent completed execution without generating a textual response.")
+            st.warning(
+                "No text and no tools. Check that the LLM endpoint is healthy and "
+                "thinking mode is off (or max_tokens is larger than the thinking budget)."
+            )
 
         if last_metrics:
             st.caption("⏱️ " + format_metrics(last_metrics))
