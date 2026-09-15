@@ -37,15 +37,30 @@ def build_shell_invocation(command: str) -> Sequence[str]:
     return ["/bin/bash", "-lc", command]
 
 
-def get_safe_workspace_path(file_path: str) -> str:
-    """Resolve paths strictly inside the sandboxed workspace directory."""
-    if not os.path.isabs(file_path):
-        target = os.path.abspath(os.path.join(WORKSPACE_DIR, file_path))
-    else:
-        target = os.path.abspath(file_path)
+def _strip_workspace_prefix(file_path: str) -> str:
+    """Drop redundant workspace/ prefixes so paths stay at the sandbox root."""
+    p = (file_path or "").replace("\\", "/").strip()
+    while p.startswith("./"):
+        p = p[2:]
+    while p.startswith("workspace/"):
+        p = p[len("workspace/"):]
+    if p == "workspace":
+        p = "."
+    return p.lstrip("/") or "."
 
-    # Prevent directory traversal attacks out of root or workspace
-    if not (target.startswith(WORKSPACE_DIR) or target.startswith(ROOT_DIR)):
+
+def get_safe_workspace_path(file_path: str) -> str:
+    """Resolve a path inside the sandbox. Accepts 'app.py', 'pkg/mod.py', or absolute paths under the project."""
+    if not file_path:
+        raise ValueError("file_path is required")
+    if os.path.isabs(file_path):
+        target = os.path.abspath(file_path)
+    else:
+        rel = _strip_workspace_prefix(file_path)
+        target = os.path.abspath(os.path.join(WORKSPACE_DIR, rel))
+
+    # Keep writes inside the project (prefer the sandbox root).
+    if not (target.startswith(WORKSPACE_DIR + os.sep) or target == WORKSPACE_DIR or target.startswith(ROOT_DIR + os.sep)):
         raise PermissionError("Access denied: Target path is outside project root.")
     return target
 
@@ -314,16 +329,20 @@ def read_local_file(file_path: str) -> str:
 @tool
 def write_local_file(file_path: str, content: str) -> str:
     """
-    Write content to a file strictly inside the sandboxed workspace directory (./workspace).
-    Protects project source files and contains all generated code.
+    Write a file inside the ./workspace sandbox.
+    Use paths relative to the sandbox root (e.g. `app.py` or `pkg/mod.py`).
+    Do not prefix with `workspace/` — that would create workspace/workspace/.
+    Prefer one focused file per call; split large apps across multiple writes.
     """
+    if content and len(content) > 80_000:
+        return "Error: content too large for one call. Split into smaller files."
     try:
         resolved_path = get_safe_workspace_path(file_path)
         os.makedirs(os.path.dirname(resolved_path), exist_ok=True)
         with open(resolved_path, 'w', encoding='utf-8') as f:
             f.write(content)
         rel_display = os.path.relpath(resolved_path, ROOT_DIR)
-        return f"Successfully wrote to '{rel_display}' (contained in sandbox)."
+        return f"Successfully wrote to '{rel_display}' (contained in sandbox, {len(content)} chars)."
     except Exception as e:
         return f"Error writing to file: {str(e)}"
 
