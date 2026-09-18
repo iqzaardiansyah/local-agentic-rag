@@ -1,453 +1,304 @@
-# 🤖 Local Agentic RAG: Enterprise-Grade, 100% Free AI Agent Stack
+# Local Agentic RAG
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-orange.svg)](https://github.com/langchain-ai/langgraph)
-[![Ollama](https://img.shields.io/badge/LLM%20Backend-Ollama%20(Parallel%3D4)-black.svg)](https://ollama.ai/)
+[![Backend](https://img.shields.io/badge/LLM-OpenAI--compatible%20(Ollama%20%2F%20llama.cpp%20%2F%20vLLM)-black.svg)]()
 [![ChromaDB](https://img.shields.io/badge/Vectorstore-ChromaDB-green.svg)](https://www.trychroma.com/)
 [![GraphRAG](https://img.shields.io/badge/Knowledge%20Graph-NetworkX-red.svg)](https://networkx.org/)
-[![MCP](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol%20(JSON--RPC%202.0)-purple.svg)](https://modelcontextprotocol.io/)
 [![UI](https://img.shields.io/badge/UI-Streamlit-FF4B4B.svg)](https://streamlit.io/)
-[![Cost](https://img.shields.io/badge/Cost-%240%20(Zero%20Credit%20Card)-brightgreen.svg)]()
+[![Cost](https://img.shields.io/badge/Cost-%240-brightgreen.svg)]()
 
-An enterprise-grade, production-ready **Local Agentic AI Assistant** featuring cyclic graph orchestration, dual-stage Hybrid RAG with Cross-Encoder reranking, official Model Context Protocol (MCP) SQLite introspection, Reflexion self-healing auto-debugging, multi-slot parallel subagent fan-out, persistent episodic memory, in-memory GraphRAG, and an interactive Streamlit workbench—**all completely 100% free to run without credit cards**!
-
----
-
-## 📑 Table of Contents
-- [Architecture Overview](#-architecture-overview)
-- [Key Features](#-key-features)
-- [Repository Structure](#-repository-structure)
-- [Quickstart Guide](#-quickstart-guide)
-- [Agent Tool Ecosystem](#-agent-tool-ecosystem)
-- [License](#-license)
+Local agentic assistant: LangGraph tool loop, hybrid RAG + GraphRAG, MCP SQLite, sandbox coding tools, Streamlit UI, FastAPI + SSE. Models are configured in `.env` (Ollama, llama.cpp, vLLM, K2 Horizon, etc.).
 
 ---
 
-## 🏛️ Architecture Overview
+## Table of contents
+
+- [Architecture](#architecture)
+- [LLM configuration](#llm-configuration)
+- [Key features](#key-features)
+- [Repository structure](#repository-structure)
+- [Quickstart](#quickstart)
+- [Agent tools](#agent-tools)
+- [REST API](#rest-api)
+- [Offline RAG eval](#offline-rag-eval)
+- [License](#license)
+
+---
+
+## Architecture
 
 ```mermaid
 flowchart TD
-    subgraph UI_Layer ["Streamlit UI & Observability Layer"]
-        Chat["💬 Live Streaming Chat & st.status Observability"]
-        Workbench["🛠️ Artifact & Code Diff Explorer / Terminal Runner"]
-        KB_Manager["📚 Multi-Format Ingestion & Chroma/Graph Manager"]
+    subgraph UI_Layer ["Streamlit UI"]
+        Chat["Streaming chat + observability"]
+        Workbench["Sandbox code / diff / terminal"]
+        KB["KB ingest, reindex, eval, export"]
     end
 
-    subgraph Agent_Core ["LangGraph Cyclic State Machine"]
-        Supervisor["🤖 Lead Agent / Supervisor Node (Qwen 3.8 27B / xhigh reasoning)"]
-        ToolRouter{"Tools Execution Node"}
-        Evaluator["🧠 Unified Evaluator Node"]
-        
-        CRAG["🎯 CRAG Relevance Grader"]
-        Reflexion["🔧 Reflexion Code Auto-Debugger"]
+    subgraph Agent_Core ["LangGraph"]
+        Supervisor["Lead agent (env model)"]
+        ToolRouter{"Tools"}
+        Evaluator["CRAG + Reflexion"]
     end
 
-    subgraph Intelligence_Subsystems ["Modular Engine Subsystems"]
-        subgraph Subagents ["⚡ Parallel Subagent Fan-Out (OLLAMA_NUM_PARALLEL=4)"]
-            Sub1["Researcher Subagent"]
-            Sub2["Coder Subagent"]
-            Sub3["Data Analyst Subagent"]
-            Sub4["RAG Specialist Subagent"]
-        end
-        
-        subgraph Retrieval ["🔍 2-Stage Hybrid RAG Pipeline"]
-            BM25["Sparse BM25 Keyword Search"]
-            ChromaDense["Dense ChromaDB Embeddings"]
-            RRF["Reciprocal Rank Fusion (RRF)"]
-            Reranker["Local Cross-Encoder (ms-marco-MiniLM)"]
-        end
-        
-        subgraph Memory ["🧠 Hierarchical Memory System"]
-            SlidingWindow["Sliding Window + Running Summary Compaction"]
-            EpisodicChroma["Persistent Vector Episodic Memory"]
-        end
-        
-        subgraph GraphRAG_System ["🕸️ Lightweight NetworkX GraphRAG"]
-            KG["Directed Multigraph Triples Store"]
-            MultiHop["1-Hop & 2-Hop BFS Path Traversal"]
-        end
-        
-        subgraph Protocols ["🔌 Model Context Protocol (MCP)"]
-            MCPServer["JSON-RPC 2.0 SQLite Server (Auto-Dispatched)"]
-            SchemaIntrospect["Table Discovery & PRAGMA Introspection"]
-            SafeSQL["Read-Only Parameterized Query Executor"]
-        end
-        
-        subgraph Sandbox ["💻 Developer Sandbox ./workspace"]
-            FileIO["Sandboxed File Write & Code Slicing"]
-            Terminal["Subprocess Command Runner & Python REPL"]
-        end
+    subgraph Intelligence ["Subsystems"]
+        Subagents["Parallel subagents (LLM_MAX_PARALLEL)"]
+        Retrieval["Hybrid RAG: BM25 + dense + GraphRAG + reranker"]
+        Memory["Sliding window + episodic memory"]
+        GraphRAG["NetworkX knowledge graph"]
+        MCP["MCP SQLite (read-only)"]
+        Sandbox["./workspace sandbox"]
     end
 
     Chat --> Supervisor
     Workbench --> Sandbox
-    KB_Manager --> Retrieval
-    KB_Manager --> GraphRAG_System
-
+    KB --> Retrieval
     Supervisor --> ToolRouter
     ToolRouter --> Subagents
     ToolRouter --> Retrieval
     ToolRouter --> Memory
-    ToolRouter --> GraphRAG_System
-    ToolRouter --> Protocols
+    ToolRouter --> GraphRAG
+    ToolRouter --> MCP
     ToolRouter --> Sandbox
-
     ToolRouter --> Evaluator
-    Evaluator --> CRAG
-    Evaluator --> Reflexion
-    CRAG -- "Score Evaluation" --> Supervisor
-    Reflexion -- "Auto-Fix Directive" --> Supervisor
+    Evaluator --> Supervisor
 ```
 
 ---
 
-## 🌟 Key Features
+## LLM configuration
 
-### 1. ⚡ Parallel Subagent Fan-Out / Fan-In (`OLLAMA_NUM_PARALLEL=4`)
-- Exploits Ollama's multi-slot GPU concurrency to dispatch up to 4 specialized subagents (`researcher`, `coder`, `data_analyst`, `rag_specialist`, `custom`) simultaneously.
-- Cuts multi-agent pipeline latency down to $\max(T_1, T_2, T_3, T_4)$ and aggregates structured findings back to the Lead Agent.
+All model knobs live in `.env` (see `.env.example`). They are loaded by `src/agent/llm_config.py`.
 
-### 2. 🔍 2-Stage Hybrid Search (BM25 + Dense RRF) & Local Cross-Encoder Reranker
-- **Stage 1 (Recall)**: Dual-stream sparse exact keyword matching (Okapi BM25) and dense semantic vector embeddings (`all-MiniLM-L6-v2`) fused using Reciprocal Rank Fusion ($RRF = \sum \frac{1}{60 + \text{rank}}$).
-- **Stage 2 (Precision)**: Local Cross-Encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`) cross-attention scoring on CPU (<40ms) to eliminate semantic noise.
+```env
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=qwen3.6:latest
+LLM_API_KEY=ollama
 
-### 3. 🎯 Self-RAG / Corrective RAG (CRAG) Grader Node
-- Evaluates retrieved document confidence in the LangGraph loop.
-- Automatically tags high-confidence matches or injects corrective guidance to route to live web search (`DuckDuckGo` + `read_webpage`) to prevent hallucinations.
+LLM_TEMPERATURE=0.7
+LLM_TOP_P=1.0
+LLM_MAX_TOKENS=4096
 
-### 4. 🔧 Self-Correcting Code Auto-Debugger Loop (Reflexion)
-- Intercepts runtime errors (`ZeroDivisionError`, `SyntaxError`, `NameError`, non-zero terminal exit codes) from sandbox executions.
-- Injects a structured **Reflexion Diagnostic Directive** prompting the agent to inspect the source line via `view_code_slice`, apply patches via `write_local_file`, and re-test until clean execution is achieved.
+LLM_ENABLE_THINKING=false
+LLM_THINKING_BUDGET=4096
 
-### 5. 🔌 Real Model Context Protocol (MCP) Server with SQLite Introspection
-- Standard **JSON-RPC 2.0 protocol** server with zero-port auto-dispatch (no manual `uvicorn` processes needed).
-- Dynamic schema discovery: `mcp_list_tables`, `mcp_describe_table`, and `mcp_execute_query` with strict safety guards blocking destructive operations.
+# Concurrency for parallel subagents (not hardcoded).
+# If unset: probe server, else default 4.
+LLM_MAX_PARALLEL=4
+```
 
-### 6. 🕸️ Lightweight NetworkX GraphRAG Triples Extractor
-- Pure-Python in-memory and persistent knowledge graph (`data/knowledge_graph.json`).
-- Automated regex/NLP triple extractor parsing entity-relationship tuples from ingested text.
-- 1-hop neighbor inspection and 2-hop BFS multi-hop path traversal (`query_knowledge_graph`).
+### Backends
 
-### 7. 🧠 Hierarchical Memory & Sliding-Window Context Compaction
-- **Sliding-Window Compactor**: Automatically preserves recent dialogue turns while compressing older context into a structured bulleted summary, preventing token budget blowups.
-- **Persistent Episodic Memory**: Dedicated ChromaDB vector collection (`episodic_chat_memory`) with `store_episodic_memory` and `recall_past_memory` to remember user preferences across sessions.
+| Backend | Typical `LLM_BASE_URL` | Notes |
+|--------|-------------------------|--------|
+| Ollama | `http://localhost:11434/v1` | Set `OLLAMA_NUM_PARALLEL` on the **server** to match `LLM_MAX_PARALLEL`. |
+| llama.cpp | `http://localhost:8080/v1` | Slots/ctx come from server flags (`-np`, `--ctx-size`). |
+| vLLM | `http://localhost:8000/v1` | Use `--max-num-seqs` / `--max-model-len`; set `LLM_MAX_PARALLEL` to match. |
 
-### 8. 🛠️ Interactive Artifact & Code Diff Workbench in Streamlit
-- **Code Viewer**: Syntax-highlighted code explorer for `.py`, `.sql`, `.json`, `.csv`, `.md`, `.js`, `.bash` files in `./workspace`.
-- **Visual Code Diff Explorer**: Side-by-side and unified git-style colorized diff viewer comparing sandbox files.
-- **Terminal Runner & In-Browser Editor**: Direct script execution and file editing inside the Streamlit interface.
+Notebooks:
 
-### 9. 🌊 Real-Time Token-by-Token Streaming & Live Observability
-- Built on LangGraph `stream_mode="messages"` delivering real-time typewriter token generation with an animated cursor alongside interactive `st.status` reasoning traces.
+| Notebook | Purpose |
+|----------|---------|
+| `notebooks/lm-server.ipynb` | Ollama + ngrok (Kaggle) |
+| `notebooks/lm-server-llama-cpp.ipynb` | llama.cpp CUDA server |
+| `notebooks/lm-server-vllm.ipynb` | vLLM (e.g. K2 Horizon AWQ) |
+| `notebooks/build-publish-k2-llama-cpp.ipynb` | Build/publish K2Horizon llama.cpp fork |
 
-### 10. 💬 Persistent Chat Sessions + Markdown Export
-- SQLite-backed local session store (`data/chat_sessions.db`) — chat survives refresh/restart.
-- Create, switch, rename, delete sessions in the sidebar; first user message auto-titles the session.
-- One-click **Export Session as Markdown** download with tool traces and citations.
+### K2 Horizon
 
-### 11. 📎 Clickable Citations & Source Panel
-- Hybrid RAG answers record structured citations (source, score, preview, **resolved path**).
-- Streamlit shows a **Sources & Citations** panel with Open source (matched snippet + file preview) and Download.
-- `/search` and `/sources` API endpoints return path-resolved citations for external clients.
+If `LLM_MODEL` contains `K2-Horizon`, the client auto-applies IFM-style defaults:
 
-### 12. 🌐 Free Local REST API (FastAPI) + SSE Streaming
-- `GET  /health` — model endpoint status
-- `POST /chat` — session-aware multi-turn agent turn + citations
-- `POST /chat/stream` — **Server-Sent Events** stream (`meta` / `token` / `tool_call` / `tool_result` / `grade` / `done` / `error`)
-- `POST /search` — hybrid RAG only (no LLM), path-resolved citations
-- `POST /ingest` — push text into Chroma (also saves a copy under `data/`)
-- `GET  /sessions`, `GET /sessions/{id}/export`, `GET /sources?name=...`
-- Launch: `uvicorn src.api.server:app --host 127.0.0.1 --port 8000`
+- `reasoning_effort` via `LLM_REASONING_EFFORT` (default `high`)
+- `tool_call_format` via `LLM_TOOL_CALL_FORMAT` (`json` \| `xml` \| `xml_typed`; default `xml`)
+- Temperature `1.0`, `top_p` `0.95` unless overridden
 
-### 13. 🧠 Session-Aware Multi-Turn Context
-- Shared `src/memory/session_context.py` + `src/agent/runner.py` used by both UI and API.
-- Within-session history is rebuilt each turn; other sessions + episodic memories are injected as a brief system note.
-- Citations and tool steps persist with each assistant turn.
+On vLLM, use a matching parser (e.g. `--tool-call-parser k2_horizon`). The tool format must match that parser.
 
-### 14. 📊 Offline RAG Evaluation Harness
-- Hit Rate@k, MRR, and keyword coverage on a local JSON eval set (`data/eval_set.json`).
-- Run: `python -m src.eval.rag_eval` or `python -m src.eval.rag_eval --json`
-- No paid APIs — pure local retrieval metrics for tuning.
+### Parallelism
 
-### 15. 📈 CSV / Tabular Data Tools
-- Agent tools: `list_data_files`, `analyze_csv_summary`, `csv_query`, `csv_groupby`, `save_csv_chart`.
-- pandas + matplotlib only; sample data in `data/sample_sales.csv`.
+`spawn_parallel_subagents` caps fan-out at `get_max_parallel()`:
 
-### 16. 🧭 Git Workspace Tools
-- Agent tools: `git_status`, `git_log`, `git_diff`, `git_workspace_status`.
-- Inspect project changes without leaving the chat.
+1. `LLM_MAX_PARALLEL` env  
+2. Server probe (`total_slots` / `n_parallel` / `max_num_seqs`)  
+3. Default `4`
 
-### 17. 🔁 BM25 Index Freshness
-- In-process BM25 cache auto-invalidates after upload / re-index / wipe / API ingest.
-- Stale detection compares Chroma chunk count vs the BM25 build snapshot.
-- Sidebar **Rebuild BM25 Index** button + `POST /reindex/bm25`.
+Change server capacity → update `LLM_MAX_PARALLEL` in `.env` (do not assume 4).
 
-### 18. 🪟 Windows-Safe Sandbox Shell
-- `execute_terminal_command` runs under **PowerShell** on Windows and **bash** on POSIX.
-- Uses explicit argv (no `shell=True`), UTF-8 I/O, and real exit codes for Reflexion.
-- UI default commands match the platform (`Get-Content` vs `cat`).
-
-### 19. 🩺 Live LLM Endpoint Health
-- `src/agent/health.py` pings the OpenAI-compatible `/v1/models` (with Ollama `/api/tags` fallback).
-- Sidebar shows ONLINE/OFFLINE + latency (cached ~30s) with a manual ↻ re-check.
-- `/health` returns `llm` and `bm25` status; chat warns before a turn if the endpoint is down.
-
-### 20. ⚡ Live Parallel Subagent Visibility
-- `spawn_parallel_subagents` publishes `subagent_start` / `subagent_done` / `subagents_all_done` through a thread-safe observer bus.
-- The agent runner runs the graph on a worker thread so those events interleave live with tokens/tools.
-- Streamlit status panel and SSE clients see each fan-out agent as it starts and finishes.
-
-### 21. ✨ Auto Episodic Memory Capture
-- Heuristics (`src/memory/auto_memory.py`) detect phrases like “I prefer…”, “always…”, “remember that…”.
-- Facts are stored with category + session_id; near-duplicates are skipped.
-- Sidebar toggle; API `auto_memory` flag + `memory_capture` SSE event / response field.
-
-### 22. 🔎 Cross-Session Chat Search
-- `chat_sessions.search_messages()` does case-insensitive substring search across all sessions.
-- Sidebar “Search all sessions” expander with Open-session jump buttons.
-- `GET /sessions/search?q=...` for API clients.
-
-### 23. 🕸️ GraphRAG Fusion in Hybrid Search & Citations
-- KG subgraph hits become real Documents (`metadata.kind='graphrag'`) with paths to `data/knowledge_graph.json`.
-- Fused with dense + BM25 via the same RRF, then cross-encoder reranked.
-- Citation panel shows GraphRAG sources with entity previews; `query_knowledge_graph` also records citations.
-
-### 24. 🌐 URL → Knowledge Base Ingest
-- `ingest_webpage` tool + `POST /ingest/url` + sidebar “Ingest URL” expander.
-- Scrapes page → saves under `data/` → chunks into Chroma → extracts GraphRAG triples → invalidates BM25.
-
-### 25. 🧬 Auto-Generated RAG Eval Set
-- `src/eval/auto_eval_set.py` derives cases from headings / sentences / keywords in `data/` files.
-- Merge-safe with hand-written cases; CLI: `python -m src.eval.rag_eval --generate` or `--generate-only`.
-- Sidebar buttons to generate cases and run Hit@3 / MRR.
-
-### 26. ⏱️ Turn Metrics (wall / TTFT / tok/s / tool latency)
-- `TurnMetrics` in the runner records wall time, time-to-first-token, token rate, and per-tool latency.
-- Caption under each assistant reply + `metrics` on `/chat` and `done` SSE events.
-
-### 27. 🗄️ Local Web Search Cache
-- SQLite TTL cache (`data/web_search_cache.db`, default 6h) for `web_search` and subagent search.
-- `GET/DELETE /cache/websearch` for stats and clear.
-
-### 28. 🔀 Fork Session & 🔄 Regenerate Reply
-- Fork: copy history up to any message into a new session (`fork_session`).
-- Regenerate: delete the last assistant reply and re-run the last user message with full multi-turn context.
-
-### 29. 🧠 Stronger GraphRAG Triple Extraction
-- Expanded relations (`USES` incl. passive, `BUILT_WITH`, `CREATED`, `LOCATED_IN`, …).
-- Entity hygiene + stopword rejection + proper/technical preference.
-- Per-document `max_triples` cap so ingest cannot flood the graph.
-
-### 30. ⚡ Subagent Episodic Memory Injection
-- Each parallel subagent recalls top memories related to its subtask and includes them in the objective.
-- Failures never block the turn; `used_memory` flag on results.
-
-### 31. 📦 Full Knowledge Base Markdown Export
-- `src/rag/kb_export.py` bundles data/ file bodies, GraphRAG stats/triples, Chroma/BM25 stats, memory count.
-- Sidebar **Export Knowledge Base** + download; API `POST /kb/export` and `GET /kb/export/content`.
-
-### 32. 🔒 AST-Safe CSV Queries
-- `csv_query` no longer uses raw `eval`. `src/tools/safe_expr.py` walks the AST and allows only a closed set of pandas methods/ops.
-- Rejects `__import__`, `open`, `eval`, lambdas, dunder access, etc.
-- Supports filters (`city == 'NYC'`), column locals (`df[sales > 100]`), and aggregates (`df.groupby(...)`).
-
-### 33. 🧭 Config / `.env` Validation
-- `src/agent/config.py` checks required keys, URL scheme/host, placeholders, missing API key.
-- Sidebar **Config check (.env)** expander; API `GET /config/validate`.
-
-### 34. 📄 Research Brief Export
-- Question + answer + ranked citations (+ tools/metrics) as Markdown.
-- **Brief** button on assistant messages; sidebar download; API `POST /sessions/{id}/brief`.
-
-### 35. 👀 data/ File-Watch + Auto-Reindex
-- `src/rag/watcher.py` fingerprints file names/sizes/mtimes under `data/`.
-- Sidebar FRESH/STALE badge, **Re-index now**, optional auto-reindex toggle.
-- Fingerprint saved after reindex/upload/URL ingest; API `GET /kb/watch`, `POST /kb/reindex`.
-
-### 36. 📌 Pin / Favorite Sessions
-- Pinned sessions sort to the top of the picker (`pinned` column + migration).
-- **Pin/Unpin session** button; API `POST /sessions/{id}/pin`.
 ---
 
-## 📁 Repository Structure
+## Key features
+
+### Agent runtime
+- LangGraph lead agent + tool node + CRAG/Reflexion evaluator
+- Shared runner for UI and API: tokens, tool calls, subagent events, metrics
+- Session history + optional cross-session / episodic context
+- Fork session, regenerate last reply, pin sessions, search all sessions
+- Auto-capture of preference phrases into episodic memory
+
+### Retrieval
+- Hybrid search: BM25 + Chroma dense + GraphRAG documents → RRF → cross-encoder
+- Citations with on-disk path, preview, download (DBs/binary skipped)
+- URL ingest → `data/` + Chroma + GraphRAG + BM25 invalidate
+- `data/` fingerprint watch + reindex; KB Markdown export
+- Offline eval: Hit@k, MRR (`python -m src.eval.rag_eval`)
+
+### Tools
+- Coding sandbox: files, terminal (PowerShell on Windows / bash on POSIX), Python REPL
+- Codebase: tree, grep, slice, glob
+- Data: AST-safe CSV query/groupby/charts
+- Git status/log/diff
+- MCP SQLite introspection (read-only)
+- Web search (local TTL cache) + page scrape
+
+### UI & API
+- Streamlit chat, citations, workbench, health check, auto-scroll
+- FastAPI + SSE (`/chat/stream`)
+- Session persist/export, research brief, KB export
+- Config validation for `.env`
+
+---
+
+## Repository structure
 
 ```text
 local-agentic-rag/
-├── data/
-│   ├── chroma_db/             # Persistent document vectorstore
-│   ├── chroma_memory/         # Persistent episodic memory vectorstore
-│   └── knowledge_graph.json   # Persistent NetworkX GraphRAG triples
-├── notebooks/
-│   └── lm-server.ipynb        # Free Kaggle/Colab GPU server with Ollama & ngrok
+├── data/                      # KB sources, eval set, runtime DBs
+├── notebooks/                 # Ollama / llama.cpp / vLLM / K2 build notebooks
 ├── src/
 │   ├── agent/
-│   │   ├── config.py          # .env / LLM config validation
-│   │   ├── graph.py           # Master LangGraph state machine & Lead Agent
-│   │   ├── health.py          # Local LLM endpoint health probe
-│   │   ├── metrics.py         # Turn metrics (TTFT, tok/s, tool latency)
-│   │   ├── runner.py          # Shared event-stream runner (UI + API + SSE)
-│   │   ├── subagent_events.py # Thread-safe parallel-subagent progress bus
-│   │   └── subagents.py       # Parallel subagent factory & dispatch engine
-│   ├── api/
-│   │   └── server.py          # Free local FastAPI REST API + SSE
-│   ├── eval/
-│   │   ├── auto_eval_set.py   # Auto-generate eval cases from data/
-│   │   └── rag_eval.py        # Offline Hit@k / MRR evaluation harness
-│   ├── memory/
-│   │   ├── auto_memory.py     # Heuristic preference capture → episodic store
-│   │   ├── chat_sessions.py   # SQLite chat session persistence + search/export
-│   │   ├── research_brief.py  # Q&A + sources → research brief Markdown
-│   │   ├── session_context.py # Multi-turn + cross-session context builder
-│   │   └── episodic_memory.py # Vector memory & sliding-window context compactor
-│   ├── mcp_server/
-│   │   ├── sqlite_server.py   # Official JSON-RPC 2.0 MCP SQLite server
-│   │   └── mock_data.db       # Relational SQLite database
-│   ├── rag/
-│   │   ├── vectorstore.py     # ChromaDB multi-format document indexer
-│   │   ├── hybrid_search.py   # BM25 + Dense + GraphRAG Reciprocal Rank Fusion
-│   │   ├── ingest_url.py      # Webpage → data/ + Chroma + GraphRAG ingest
-│   │   ├── kb_export.py       # Full knowledge-base Markdown export
-│   │   ├── watcher.py         # data/ fingerprint watch + auto-reindex
-│   │   ├── reranker.py        # Sentence-transformers Cross-Encoder
-│   │   ├── citations.py       # In-process RAG citation store
-│   │   └── graph_rag.py       # NetworkX GraphRAG + regex triple extractor v2
-│   └── tools/
-│       ├── coding_tools.py    # Sandboxed terminal, file I/O, tree, grep, slice
-│       ├── data_tools.py      # CSV/Excel pandas analysis & chart tools
-│       ├── safe_expr.py       # AST-safe expression evaluator for csv_query
-│       ├── git_tools.py       # Local git status/log/diff tools
-│       ├── graph_tool.py      # Knowledge graph multi-hop query tool
-│       ├── mcp_tool.py        # MCP client tools (tables, describe, query)
-│       ├── rag_tool.py        # Hybrid search tool (BM25 + dense + GraphRAG)
-│       ├── web_cache.py       # Local TTL cache for web_search results
-│       └── web_scraper.py     # DuckDuckGo web search & HTML scraper
+│   │   ├── config.py          # .env validation
+│   │   ├── graph.py           # LangGraph lead agent
+│   │   ├── health.py          # LLM endpoint probe
+│   │   ├── llm_config.py      # Env-driven model settings
+│   │   ├── metrics.py         # Turn metrics
+│   │   ├── runner.py          # UI/API event runner
+│   │   ├── subagent_events.py # Subagent progress bus
+│   │   └── subagents.py       # Parallel subagents
+│   ├── api/server.py          # FastAPI + SSE
+│   ├── eval/                  # Offline RAG eval + auto case gen
+│   ├── memory/                # Sessions, context, episodic, briefs
+│   ├── mcp_server/            # SQLite MCP
+│   ├── rag/                   # Vectorstore, hybrid search, GraphRAG, export
+│   └── tools/                 # Coding, data, git, RAG, web tools
 ├── ui/
-│   ├── app.py                 # Streamlit chat & interactive workbench UI
-│   └── citation_view.py       # Clickable citation open/preview/download panel
-├── workspace/                 # Sandboxed environment for agent-generated code
-├── data/
-│   ├── eval_set.json          # Offline RAG evaluation cases
-│   └── sample_sales.csv       # Sample tabular data for data tools
-├── requirements.txt           # Project dependencies
-└── README.md                  # Project documentation
+│   ├── app.py                 # Streamlit app
+│   └── citation_view.py
+├── workspace/                 # Agent sandbox (gitignored)
+├── .streamlit/config.toml
+├── .env.example
+└── requirements.txt
 ```
 
 ---
 
-## 🚀 Quickstart Guide
+## Quickstart
 
-### 1. Start the Remote LLM Backend ($0 Free GPU)
-1. Open [`notebooks/lm-server.ipynb`](notebooks/lm-server.ipynb) on a free **Kaggle** (2x T4 GPUs) or **Google Colab** instance.
-2. Add your ngrok token to the notebook secrets (`NGROK_AUTHTOKEN`).
-3. Run all cells. The notebook starts Ollama with `OLLAMA_NUM_PARALLEL=4` and outputs a public URL:
-   ```text
-   Public ngrok endpoint: https://xxxx-xx-xxx.ngrok-free.app/v1
-   ```
+### 1. LLM backend
 
-### 2. Setup Local Environment
-Clone the repository and install the dependencies:
+Pick one notebook (or local Ollama) and note the `/v1` URL. Set server concurrency (Ollama `OLLAMA_NUM_PARALLEL`, llama.cpp `-np`, vLLM `--max-num-seqs`) and keep `LLM_MAX_PARALLEL` in `.env` in sync.
+
+### 2. Install
+
 ```bash
 git clone https://github.com/iqzaardiansyah/local-agentic-rag.git
 cd local-agentic-rag
-
 python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On Linux / macOS:
-# source venv/bin/activate
-
+# Windows: venv\Scripts\activate
+# Unix: source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure `.env`
-Create a `.env` file in the root directory:
+### 3. `.env`
+
 ```env
-LLM_BASE_URL=https://xxxx-xx-xxx.ngrok-free.app/v1
+LLM_BASE_URL=https://your-endpoint/v1
 LLM_MODEL=qwen3.8:27b
 LLM_API_KEY=ollama
+LLM_MAX_PARALLEL=4
 ```
 
-### 4. Launch the Streamlit Application
+Copy `.env.example` for the full list (sampling, thinking, K2, timeouts).
+
+### 4. Run UI
+
 ```bash
 streamlit run ui/app.py
 ```
-Open `http://localhost:8501` in your browser!
 
----
+Open `http://localhost:8501`.
 
-## 🧰 Agent Tool Ecosystem
-
-| Tool Name | Category | Description |
-| :--- | :--- | :--- |
-| **`spawn_parallel_subagents`** | Orchestration | Concurrently runs up to 4 specialized subagents across parallel Ollama GPU slots. |
-| **`search_local_documents`** | Hybrid RAG | 2-stage hybrid retrieval (BM25 + Chroma Dense + GraphRAG via RRF) with Cross-Encoder reranking. |
-| **`query_knowledge_graph`** | GraphRAG | Traverses NetworkX knowledge graph for 1-hop and 2-hop relational paths. |
-| **`ingest_webpage`** | Ingest | Scrape a URL into data/ + Chroma + GraphRAG and make it searchable. |
-| **`recall_past_memory`** | Memory | Semantically recalls user preferences and project rules from persistent vector memory. |
-| **`store_episodic_memory`** | Memory | Permanently saves facts and architectural decisions to long-term memory. |
-| **`mcp_list_tables`** | MCP Database | Discovers all SQLite tables and record counts via MCP JSON-RPC 2.0. |
-| **`mcp_describe_table`** | MCP Database | Introspects table schema, column data types, primary keys, and foreign keys. |
-| **`mcp_execute_query`** | MCP Database | Executes parameterized read-only SQL queries with safety validation. |
-| **`execute_python_code`** | Coding | Sandboxed Python REPL for mathematical calculations and data transformations. |
-| **`execute_terminal_command`** | Coding | Runs bash/shell commands, tests, and scripts inside `./workspace`. |
-| **`read_local_file`** | File I/O | Reads file contents safely within the `./workspace` sandbox. |
-| **`write_local_file`** | File I/O | Creates or overwrites code files inside `./workspace`. |
-| **`list_directory_tree`** | Codebase | Recursively prints directory tree structures with size metrics. |
-| **`grep_search`** | Codebase | Regex/pattern search across codebase files with line numbers. |
-| **`view_code_slice`** | Codebase | Reads precise line number ranges without dumping entire files. |
-| **`find_files_by_pattern`** | Codebase | Glob pattern search (e.g. `*.py`, `*.json`) across project directories. |
-| **`web_search`** | Web | Live internet search via DuckDuckGo. |
-| **`read_webpage`** | Web | Scrapes and converts live webpage HTML into clean readable markdown. |
-| **`list_data_files`** | Data | Lists CSV/Excel/JSON data files in `data/` and `workspace/`. |
-| **`analyze_csv_summary`** | Data | Shape, dtypes, nulls, describe stats, and preview for a CSV. |
-| **`csv_query`** | Data | Pandas expression eval against a CSV (`df` is available). |
-| **`csv_groupby`** | Data | Group-by aggregation (mean/sum/count/min/max/median/std). |
-| **`save_csv_chart`** | Data | Renders line/bar/scatter/hist charts into `workspace/`. |
-| **`git_status`** | Git | Project git status (branch + changes). |
-| **`git_log`** | Git | Recent commit history. |
-| **`git_diff`** | Git | Unified git diff (optionally staged / path-filtered). |
-| **`git_workspace_status`** | Git | Git status of `./workspace` if it is a repo. |
-
----
-
-## 🌐 Free Local REST API
+Optional API:
 
 ```bash
 uvicorn src.api.server:app --host 127.0.0.1 --port 8000
 ```
 
-```bash
-curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/search -H "Content-Type: application/json" -d '{"query":"hybrid search","top_k":3}'
-curl -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" -d '{"message":"Summarize the local knowledge base","session_id":"demo-1"}'
-curl -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: application/json" -d '{"message":"List data files","session_id":"demo-1"}'
-curl -X POST http://127.0.0.1:8000/reindex/bm25
-curl "http://127.0.0.1:8000/sources?name=README.md"
-curl "http://127.0.0.1:8000/sessions/search?q=hybrid"
-curl -X POST http://127.0.0.1:8000/kb/export
-curl http://127.0.0.1:8000/config/validate
-curl http://127.0.0.1:8000/kb/watch
-curl -X POST http://127.0.0.1:8000/kb/reindex
-curl -X POST http://127.0.0.1:8000/sessions/demo-1/brief
-curl -X POST "http://127.0.0.1:8000/sessions/demo-1/pin?pinned=true"
-```
+---
 
-SSE events on `/chat/stream`: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `subagent_start`, `subagent_done`, `subagents_all_done`, `memory_capture`, `done`, `error`.
+## Agent tools
 
-When `session_id` is set on `/chat` or `/chat/stream`, prior turns in that session are used as multi-turn context and the exchange is persisted (with citations).
-
-## 📊 Offline RAG Eval
-
-```bash
-python -m src.eval.rag_eval
-python -m src.eval.rag_eval --top-k 5 --json
-python -m src.eval.auto_eval_set          # generate/merge cases from data/
-python -m src.eval.rag_eval --generate    # generate then evaluate
-```
-
-Add cases to `data/eval_set.json` as `{"query", "expected_source_substring", "answer_keywords"}`, or let `--generate` derive them from files in `data/`.
+| Tool | Category | Description |
+|------|----------|-------------|
+| `spawn_parallel_subagents` | Orchestration | Fan-out subagents (capped by `LLM_MAX_PARALLEL`). |
+| `search_local_documents` | Hybrid RAG | BM25 + dense + GraphRAG + reranker + citations. |
+| `query_knowledge_graph` | GraphRAG | 1-hop / 2-hop knowledge graph paths. |
+| `ingest_webpage` | Ingest | URL → `data/` + Chroma + GraphRAG. |
+| `recall_past_memory` / `store_episodic_memory` | Memory | Episodic vector memory. |
+| `mcp_list_tables` / `mcp_describe_table` / `mcp_execute_query` | MCP | SQLite introspection (read-only). |
+| `execute_python_code` | Coding | Sandbox Python. |
+| `execute_terminal_command` | Coding | PowerShell (Windows) / bash (POSIX) in `./workspace`. |
+| `read_local_file` / `write_local_file` | File I/O | Sandbox files. |
+| `list_directory_tree` / `grep_search` / `view_code_slice` / `find_files_by_pattern` | Codebase | Inspect project/sandbox. |
+| `web_search` / `read_webpage` | Web | DuckDuckGo + scrape (cached). |
+| `list_data_files` / `analyze_csv_summary` / `csv_query` / `csv_groupby` / `save_csv_chart` | Data | Safe CSV/Excel analysis. |
+| `git_status` / `git_log` / `git_diff` / `git_workspace_status` | Git | Repo status. |
 
 ---
 
-## 📜 License
-Distributed under the MIT License. Built with ❤️ by [iqzaardiansyah](https://github.com/iqzaardiansyah).
+## REST API
+
+```bash
+uvicorn src.api.server:app --host 127.0.0.1 --port 8000
+```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /health` | LLM + BM25 health |
+| `POST /chat` | Full agent turn + citations + metrics |
+| `POST /chat/stream` | SSE: `meta`, `token`, `tool_call`, `tool_result`, `grade`, `subagent_*`, `memory_capture`, `done`, `error` |
+| `POST /search` | Hybrid RAG only |
+| `POST /ingest` / `POST /ingest/url` | Index text or URL |
+| `GET/DELETE /cache/websearch` | Web cache |
+| `GET /kb/watch` / `POST /kb/reindex` | data/ freshness |
+| `POST /kb/export` | KB Markdown export |
+| `GET /config/validate` | `.env` check |
+| `GET /sessions` / `GET /sessions/search` | Sessions + search |
+| `POST /sessions/{id}/brief` | Research brief |
+| `POST /sessions/{id}/pin` | Pin session |
+| `GET /sources?name=` | Resolve citation file |
+
+```bash
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"List data files","session_id":"demo-1"}'
+```
+
+---
+
+## Offline RAG eval
+
+```bash
+python -m src.eval.rag_eval
+python -m src.eval.auto_eval_set
+python -m src.eval.rag_eval --generate
+```
+
+Cases: `data/eval_set.json` → `query`, `expected_source_substring`, `answer_keywords`.
+
+---
+
+## License
+
+MIT. Built by [iqzaardiansyah](https://github.com/iqzaardiansyah).
