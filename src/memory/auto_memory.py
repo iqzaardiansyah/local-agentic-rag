@@ -96,7 +96,6 @@ def extract_preference_facts(user_message: str) -> List[str]:
                 continue
             seen.add(low)
             found.append(fact)
-    # Cap to avoid flooding memory from one long message
     return found[:3]
 
 

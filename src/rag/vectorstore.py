@@ -12,6 +12,32 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 CHROMA_DB_DIR = os.path.join(ROOT_DIR, "chroma_db")
 
+# Not document sources (DBs, runtime files).
+SKIP_INDEX_NAMES = {
+    "chat_sessions.db",
+    "web_search_cache.db",
+    "knowledge_graph.json",
+    "eval_set.json",
+    ".index_fingerprint.json",
+}
+SKIP_INDEX_EXTS = {
+    ".db", ".sqlite", ".sqlite3", ".bin", ".pt", ".pth", ".onnx",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".zip", ".gz", ".tar", ".7z", ".rar",
+    ".mp3", ".mp4", ".wav", ".pdf",
+}
+
+
+def is_indexable_file(name: str) -> bool:
+    base = os.path.basename(name or "")
+    if not base or base.startswith("."):
+        return False
+    if base in SKIP_INDEX_NAMES:
+        return False
+    ext = os.path.splitext(base)[1].lower()
+    return ext not in SKIP_INDEX_EXTS
+
+
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(CHROMA_DB_DIR, exist_ok=True)
 
@@ -163,7 +189,7 @@ def reindex_all_data() -> int:
     all_docs = []
     for f in os.listdir(DATA_DIR):
         fpath = os.path.join(DATA_DIR, f)
-        if os.path.isfile(fpath):
+        if os.path.isfile(fpath) and is_indexable_file(f):
             all_docs.extend(load_file_content(fpath))
 
     if not all_docs:

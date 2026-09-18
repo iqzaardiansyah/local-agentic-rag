@@ -53,13 +53,19 @@ def _chroma_document_count() -> int:
 
 
 def _load_documents_from_chroma() -> List[Document]:
+    from src.rag.vectorstore import is_indexable_file
+
     vs = get_vectorstore()
     col_data = vs._collection.get()
     documents: List[Document] = []
     if col_data and col_data.get("documents"):
         metas = col_data.get("metadatas") or [{}] * len(col_data["documents"])
         for text, meta in zip(col_data["documents"], metas):
-            documents.append(Document(page_content=text, metadata=meta or {}))
+            meta = meta or {}
+            src = meta.get("source") or meta.get("path") or ""
+            if src and not is_indexable_file(src):
+                continue
+            documents.append(Document(page_content=text, metadata=meta))
     return documents
 
 
@@ -205,6 +211,20 @@ def hybrid_search(
             graph_docs = graph_documents_for_query(query, max_docs=3)
         except Exception:
             graph_docs = []
+
+    try:
+        from src.rag.vectorstore import is_indexable_file
+
+        def _ok(doc: Document) -> bool:
+            src = (doc.metadata or {}).get("source") or (doc.metadata or {}).get("path") or ""
+            if (doc.metadata or {}).get("kind") == "graphrag":
+                return True
+            return (not src) or is_indexable_file(src)
+
+        dense_docs = [d for d in dense_docs if _ok(d)]
+        sparse_docs = [d for d in sparse_docs if _ok(d)]
+    except Exception:
+        pass
 
     ranked_lists = [docs for docs in (dense_docs, sparse_docs, graph_docs) if docs]
     if not ranked_lists:

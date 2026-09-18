@@ -99,7 +99,7 @@ def clear_all_memories():
     except Exception:
         pass
 
-# --- Agent Tools for Episodic Memory ---
+# Episodic memory tools
 
 @tool
 def recall_past_memory(query: str) -> str:
@@ -128,7 +128,7 @@ def store_episodic_memory(fact: str, category: str = "general") -> str:
     mem_id = save_memory(fact, category)
     return f"✅ Stored in long-term memory under [{category.upper()}]: \"{fact}\" (ID: {mem_id[:8]})"
 
-# --- Context Window Compaction & Summarization Helper ---
+# Context window compaction
 
 def compact_messages_window(messages: List[BaseMessage], max_recent: int = 8) -> List[BaseMessage]:
     """
@@ -183,8 +183,6 @@ def compact_messages_window(messages: List[BaseMessage], max_recent: int = 8) ->
     result = list(system_msgs)
     result.append(summary_msg)
 
-    # If recent messages don't have a user message (e.g. only tool execution outputs),
-    # carry forward the user query so Ollama/Qwen chat templates find the required user query.
     if not has_recent_user_query:
         if last_old_human_msg:
             result.append(last_old_human_msg)

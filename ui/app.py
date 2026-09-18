@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import os
 import sys
 import difflib
@@ -44,14 +45,33 @@ from citation_view import render_citations
 
 st.set_page_config(page_title="Local Agentic RAG", page_icon="🤖", layout="wide")
 
-# --- Sidebar: Workspace & Artifacts Controls ---
+
+def _auto_scroll_chat(force: bool = False) -> None:
+    """Keep the main chat view pinned to the bottom while tokens stream."""
+    now = time.time()
+    last = st.session_state.get("_autoscroll_at", 0.0)
+    if not force and (now - last) < 0.8:
+        return
+    st.session_state["_autoscroll_at"] = now
+    html = (
+        "<script>(function(){function s(){var d=window.parent.document;"
+        "var a=['[data-testid=\"stMain\"]','section.main','[data-testid=\"stAppViewContainer\"]','main'];"
+        "for(var i=0;i<a.length;i++){var e=d.querySelector(a[i]);"
+        "if(e&&e.scrollHeight>e.clientHeight+8){e.scrollTop=e.scrollHeight;return;}}}"
+        "s();setTimeout(s,80);setTimeout(s,200);})();</script>"
+    )
+    try:
+        components.html(html, height=0)
+    except Exception:
+        pass
+
+# --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Agent & Knowledge Base")
 
     st.markdown(f"**🤖 Model:** `{LLM_MODEL}`")
     st.markdown(f"**🔗 Endpoint:** `{LLM_BASE_URL}`")
 
-    # --- Config / .env validation ---
     with st.expander("🧭 Config check (.env)", expanded=False):
         cfg = validate_config(base_url=LLM_BASE_URL, model=LLM_MODEL)
         if cfg.get("ok") and not cfg.get("issues"):
@@ -67,7 +87,7 @@ with st.sidebar:
                 st.warning(f"`{issue.get('key')}`: {issue.get('message')}")
         st.caption(f"`.env` path: `{cfg.get('env_path')}` ({'exists' if cfg.get('env_exists') else 'missing'})")
 
-    # --- LLM endpoint health (cached ~30s to avoid hammering) ---
+    # LLM health (cached ~30s)
     if "llm_health" not in st.session_state or "llm_health_ts" not in st.session_state:
         st.session_state.llm_health = None
         st.session_state.llm_health_ts = 0.0
@@ -84,7 +104,7 @@ with st.sidebar:
             st.success(format_health_badge(hh))
         else:
             st.error(format_health_badge(hh))
-            st.caption("Start Ollama / your ngrok notebook, then hit ↻.")
+            st.caption("Start the model server, then hit ↻.")
     with col_h2:
         if st.button("↻", key="recheck_llm", help="Re-check LLM endpoint"):
             st.session_state.llm_health = check_llm_endpoint(LLM_BASE_URL)
@@ -211,7 +231,6 @@ with st.sidebar:
         st.warning("Knowledge Base wiped.")
         st.rerun()
 
-    # --- data/ file-watch freshness ---
     freshness = check_freshness()
     if freshness.get("fresh"):
         st.success(format_freshness(freshness))
@@ -314,7 +333,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Research brief download (if one was just generated)
     brief = st.session_state.get("last_research_brief")
     if brief and brief.get("markdown"):
         st.download_button(
@@ -336,17 +354,15 @@ with st.sidebar:
         st.session_state.messages = chat_sessions.load_messages(st.session_state.active_session_id)
 
     if session_options:
-        # Show pin stars in the picker label
         pin_map = {s["id"]: bool(s.get("pinned")) for s in all_sessions}
+        if "session_picker" not in st.session_state or st.session_state.session_picker not in session_options:
+            st.session_state["session_picker"] = st.session_state.active_session_id
         selected = st.selectbox(
             "Active session",
             options=list(session_options.keys()),
             format_func=lambda sid: (
                 ("📌 " if pin_map.get(sid) else "") + session_options[sid]
             ),
-            index=list(session_options.keys()).index(st.session_state.active_session_id)
-            if st.session_state.active_session_id in session_options
-            else 0,
             key="session_picker",
         )
         if selected != st.session_state.active_session_id:
@@ -380,7 +396,6 @@ with st.sidebar:
         st.warning("Session deleted.")
         st.rerun()
 
-    # --- Cross-session search ---
     with st.expander("🔎 Search all sessions", expanded=False):
         search_q = st.text_input(
             "Find text in any chat",
@@ -423,7 +438,6 @@ with st.sidebar:
         st.rerun()
 
 
-# --- Main App Header ---
 st.title("🤖 Local Agentic RAG Portfolio Project")
 
 
@@ -443,8 +457,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
         hh = st.session_state.get("llm_health") or {}
         if not hh.get("ok"):
             st.warning(
-                "LLM endpoint looks offline. The agent may fail. "
-                "Check Ollama / ngrok in the sidebar (↻)."
+                "LLM endpoint looks offline. Check the model server in the sidebar (↻)."
             )
 
         agent_messages = build_agent_messages(
@@ -492,6 +505,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
                     )
                 final_response += event.get("token", "")
                 response_placeholder.markdown(final_response + "▌")
+                _auto_scroll_chat()
 
             elif etype == "thinking":
                 with status_box:
@@ -524,8 +538,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
                         slow_wait_warned = True
                         with status_box:
                             st.caption(
-                                "Remote model is still generating. Large tool lists + a "
-                                "27B model over ngrok can take a while."
+                                "Remote model is still generating. Large tool lists can take a while."
                             )
 
             elif etype == "tool_result":
@@ -589,7 +602,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
                     expanded=True,
                 )
                 st.error(f"Error during agent execution: {event.get('error')}")
-                st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
+                st.markdown("**Tip:** Check that the LLM endpoint in `.env` is reachable.")
                 final_response = final_response or f"Error: {event.get('error')}"
                 break
 
@@ -606,6 +619,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
         citations = get_citations()
         if final_response:
             response_placeholder.markdown(final_response)
+            _auto_scroll_chat(force=True)
         elif tool_steps:
             response_placeholder.markdown(
                 f"**Tools ran but there is no final summary** ({len(tool_steps)} steps). "
@@ -640,7 +654,7 @@ def _run_agent_turn_ui(prompt: str) -> None:
     except Exception as e:
         status_box.update(label="❌ Error occurred during execution", state="error", expanded=True)
         st.error(f"Error during agent execution: {str(e)}")
-        st.markdown("**Tip:** Ensure the ngrok URL in `.env` is reachable and Ollama is active.")
+        st.markdown("**Tip:** Check that the LLM endpoint in `.env` is reachable.")
 
 
 tab_chat, tab_workbench = st.tabs([
@@ -648,9 +662,6 @@ tab_chat, tab_workbench = st.tabs([
     "🛠️ Interactive Artifact & Code Diff Workbench"
 ])
 
-# =========================================================================
-# TAB 1: AGENT CHAT & LIVE OBSERVABILITY
-# =========================================================================
 with tab_chat:
     st.markdown("""
     Fully local, free-to-run AI Agent with **Live Reasoning & Observability**:
@@ -660,14 +671,11 @@ with tab_chat:
     - **Parallel Subagents**: Multi-slot parallel subagent dispatch on Ollama GPU
     """)
 
-    # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Regenerate pending (set by button; runs after history render)
     regenerate_prompt = st.session_state.pop("regenerate_prompt", None)
 
-    # Display chat messages with step history, metrics, fork, and citations
     last_assistant_idx = None
     for msg_idx, message in enumerate(st.session_state.messages):
         if message["role"] == "assistant":
@@ -748,18 +756,18 @@ with tab_chat:
                     else:
                         st.error(res.get("message") or "Brief export failed.")
 
-    # Handle regenerate (user message already in history; do not save user again)
+    if st.session_state.messages:
+        _auto_scroll_chat(force=True)
+
     if regenerate_prompt:
         with st.chat_message("assistant"):
             _run_agent_turn_ui(regenerate_prompt)
         st.rerun()
 
-    # Accept user input
     if prompt := st.chat_input("Ask a question, request data analysis, web research, or code execution..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         chat_sessions.save_message(st.session_state.active_session_id, "user", prompt)
 
-        # Auto-capture durable preferences (free heuristics, no extra LLM call)
         auto_saved = maybe_autocapture_preferences(
             prompt,
             session_id=st.session_state.active_session_id,
@@ -778,9 +786,6 @@ with tab_chat:
         with st.chat_message("assistant"):
             _run_agent_turn_ui(prompt)
 
-# =========================================================================
-# TAB 2: INTERACTIVE ARTIFACT & CODE DIFF WORKBENCH
-# =========================================================================
 with tab_workbench:
     st.markdown("### 🛠️ Interactive Sandbox Workbench & Code Diff Explorer")
     st.caption("Inspect, compare, edit, download, and execute files generated in the isolated `./workspace` sandbox.")

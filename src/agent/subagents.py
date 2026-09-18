@@ -1,7 +1,7 @@
 import os
 import time
 import concurrent.futures
-from typing import List, Dict, Any, Annotated, Sequence, TypedDict
+from typing import List, Dict, Any, Annotated, Optional, Sequence, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -55,7 +55,6 @@ def subagent_web_search(query: str) -> str:
     except Exception as e:
         return f"Web search error: {e}"
 
-# Tool profiles per subagent role
 ROLE_TOOLS = {
     "researcher": [query_knowledge_graph, subagent_web_search, read_webpage, search_local_documents],
     "coder": [execute_python_code, execute_terminal_command, read_local_file, write_local_file, grep_search, view_code_slice, list_directory_tree, find_files_by_pattern],
@@ -96,8 +95,9 @@ class SubagentState(TypedDict):
 
 def create_subagent_runner(role: str):
     """Factory to build an isolated single-loop subagent execution graph."""
-    from src.agent.llm_config import load_llm_settings, extra_body_from_settings
+    from src.agent.llm_config import load_llm_settings, extra_body_from_settings, install_k2_openai_patch
 
+    install_k2_openai_patch()
     cfg = load_llm_settings()
     subagent_llm = ChatOpenAI(
         model=cfg["model"],
@@ -106,6 +106,7 @@ def create_subagent_runner(role: str):
         temperature=cfg["subagent_temperature"],
         streaming=True,
         max_tokens=cfg["subagent_max_tokens"],
+        timeout=cfg.get("timeout_seconds", 600.0),
         extra_body=extra_body_from_settings(cfg),
     )
     
@@ -115,15 +116,17 @@ def create_subagent_runner(role: str):
     system_prompt = ROLE_PROMPTS.get(role, ROLE_PROMPTS["custom"])
     
     def subagent_node(state: SubagentState):
+        from src.agent.llm_config import sanitize_messages_for_family
+
         messages = list(state["messages"])
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=system_prompt)] + messages
-            
-        # Ensure at least one HumanMessage is present
+
         has_user = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in messages)
         if not has_user:
             messages.append(HumanMessage(content="Please execute the assigned task."))
-            
+
+        messages = sanitize_messages_for_family(messages)
         response = bound_llm.invoke(messages)
         return {"messages": [response]}
         
@@ -239,21 +242,21 @@ def execute_single_subagent(subtask: Dict[str, str], index: int = 0, total: int 
         }
 
 
-def run_subagents_parallel(subtasks: List[Dict[str, str]], max_workers: int = 4) -> List[Dict[str, Any]]:
+def run_subagents_parallel(subtasks: List[Dict[str, str]], max_workers: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Spawns multiple subagents in parallel using ThreadPoolExecutor.
-    Leverages OLLAMA_NUM_PARALLEL=4 on Ollama server for concurrent multi-slot inference.
-    Publishes subagent_start / subagent_done / subagents_all_done progress events.
+    Run subagents in parallel (capped by LLM_MAX_PARALLEL / server capacity).
     """
+    from src.agent.llm_config import get_max_parallel
+
     if not subtasks:
         return []
 
-    # Cap parallel execution at 4 workers to match server capacity
-    worker_count = min(len(subtasks), max_workers)
+    limit = max_workers if max_workers is not None else get_max_parallel()
+    limit = max(1, min(limit, len(subtasks)))
     total = len(subtasks)
     results: List[Dict[str, Any]] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=limit) as executor:
         future_to_task = {
             executor.submit(execute_single_subagent, st, idx, total): (st, idx)
             for idx, st in enumerate(subtasks)
@@ -284,9 +287,9 @@ def run_subagents_parallel(subtasks: List[Dict[str, str]], max_workers: int = 4)
 @tool
 def spawn_parallel_subagents(subtasks: List[Dict[str, str]]) -> str:
     """
-    Run up to 4 specialized subagents in parallel (researcher, coder, data_analyst,
-    rag_specialist, custom). Use for multi-step builds or work that would overflow
-    one agent context. Keep each subtask small and file-oriented.
+    Run specialized subagents in parallel (researcher, coder, data_analyst,
+    rag_specialist, custom). Parallelism is capped by server capacity
+    (LLM_MAX_PARALLEL, default 4). Keep each subtask small and file-oriented.
 
     Example:
         spawn_parallel_subagents(subtasks=[
@@ -295,12 +298,17 @@ def spawn_parallel_subagents(subtasks: List[Dict[str, str]]) -> str:
             {"role": "coder", "task": "Create todo_app/tests/test_app.py with 3 pytest cases"}
         ])
     """
+    from src.agent.llm_config import get_max_parallel
+
     if not subtasks:
         return "Error: No subtasks provided."
-        
-    # Run in parallel
-    results = run_subagents_parallel(subtasks, max_workers=4)
-    
+
+    limit = get_max_parallel()
+    if len(subtasks) > limit:
+        subtasks = subtasks[:limit]
+
+    results = run_subagents_parallel(subtasks, max_workers=limit)
+
     formatted = [f"### ⚡ Parallel Subagent Execution Report ({len(results)} Subagents Finished)"]
     for r in results:
         status_icon = "✅" if r["status"] == "success" else "❌"
@@ -309,5 +317,5 @@ def spawn_parallel_subagents(subtasks: List[Dict[str, str]]) -> str:
             f"**Objective:** {r['task']}\n"
             f"**Findings / Result:**\n{r['result']}\n"
         )
-        
+
     return "\n---\n".join(formatted)

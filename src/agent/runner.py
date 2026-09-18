@@ -6,6 +6,7 @@ Yields token, tool, subagent, and citation events on one code path.
 from __future__ import annotations
 
 import queue
+import re
 import threading
 from typing import Any, Dict, Generator, List, Optional, Sequence
 
@@ -20,6 +21,26 @@ from src.agent.subagent_events import (
 )
 
 _SENTINEL = object()
+
+# Remove tool-call XML that appears as plain text.
+_TOOL_XML_BLOCK = re.compile(
+    r"<ifm\|tool_calls>[\s\S]*?</ifm\|tool_calls>",
+    re.I,
+)
+_TOOL_XML_SINGLE = re.compile(
+    r"<ifm\|tool_call>[\s\S]*?</ifm\|tool_call>",
+    re.I,
+)
+_IFM_TAG = re.compile(r"</?ifm\|[^>]*>", re.I)
+
+
+def _strip_tool_xml(text: str) -> str:
+    if not text or "<ifm|" not in text:
+        return text
+    text = _TOOL_XML_BLOCK.sub("", text)
+    text = _TOOL_XML_SINGLE.sub("", text)
+    text = _IFM_TAG.sub("", text)
+    return text
 
 
 def _chunk_content_text(chunk: Any) -> str:
@@ -40,6 +61,10 @@ def _chunk_content_text(chunk: Any) -> str:
 
 
 def _chunk_reasoning_text(chunk: Any) -> str:
+    for attr in ("reasoning_content", "reasoning", "thinking"):
+        val = getattr(chunk, attr, None)
+        if isinstance(val, str) and val:
+            return val
     ak = getattr(chunk, "additional_kwargs", None) or {}
     for key in ("reasoning_content", "reasoning", "thinking"):
         val = ak.get(key)
@@ -69,14 +94,12 @@ def run_agent_stream(
     registered_calls: set = set()
     final_response = ""
     metrics = TurnMetrics()
-    # Map tool_call_id → tool name for latency pairing
     call_id_to_tool: Dict[str, str] = {}
     started = _time.perf_counter()
     last_visible_at = started
     last_reasoning = ""
 
     def _observer(event: Dict[str, Any]) -> None:
-        # Called from subagent worker threads.
         out_q.put(dict(event))
 
     register_subagent_observer(_observer)
@@ -152,9 +175,11 @@ def run_agent_stream(
 
                     token = _chunk_content_text(chunk)
                     if token:
-                        final_response += token
-                        metrics.mark_token(token)
-                        out_q.put({"type": "token", "token": token})
+                        token = _strip_tool_xml(token)
+                        if token:
+                            final_response += token
+                            metrics.mark_token(token)
+                            out_q.put({"type": "token", "token": token})
 
                 elif node_name == "action":
                     from langchain_core.messages import ToolMessage
@@ -191,7 +216,6 @@ def run_agent_stream(
                                 "detail": detail,
                             })
 
-                # Stall heartbeat during long silent phases
                 now = _time.perf_counter()
                 if now - last_visible_at > 3.0:
                     phase = "tools" if tool_steps else "thinking"

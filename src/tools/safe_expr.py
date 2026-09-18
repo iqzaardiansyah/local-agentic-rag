@@ -271,7 +271,7 @@ def safe_eval_expression(
         "df": df,
         "pd": pd,
     }
-    # Expose column names as locals so `df[sales > 100]` works like pandas.query
+    # Column names as locals so `df[sales > 100]` works
     for col in df.columns:
         # Avoid overwriting df/pd or forbidden names
         if col in env or _is_forbidden_name(str(col)):

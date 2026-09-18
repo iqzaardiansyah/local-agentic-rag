@@ -7,7 +7,7 @@ from networkx.readwrite import json_graph
 
 GRAPH_DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "knowledge_graph.json")
 
-# Shared stop-ish tokens that should not be entity heads (noise control).
+# Stop-word tokens that should not be treated as entities.
 _ENTITY_STOP = {
     "the", "this", "that", "these", "those", "there", "here", "and", "but",
     "for", "with", "from", "into", "onto", "over", "under", "about", "after",
@@ -72,7 +72,7 @@ def _looks_like_proper_or_technical(ent: str) -> bool:
 
 
 # Relation patterns. Each: (regex, predicate, require_proper_object)
-# Patterns are intentionally conservative to avoid graph flood.
+# (regex, predicate, require_proper_object)
 _KG_PATTERNS = [
     # X uses / utilizes / leverages / integrates / is built with Y
     (

@@ -48,14 +48,13 @@ from src.tools.git_tools import (
     git_workspace_status,
 )
 
-# Load environment variables
 load_dotenv()
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.8:27b")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
 
-# 1. Define Agent State
+# 1. Agent state
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
@@ -122,14 +121,22 @@ tools = [
 ]
 tool_node = ToolNode(tools)
 
-# 3. Initialize LLM (all knobs come from .env via llm_config)
-from src.agent.llm_config import load_llm_settings, extra_body_from_settings
+# 3. LLM (env via llm_config)
+from src.agent.llm_config import (
+    load_llm_settings,
+    extra_body_from_settings,
+    sanitize_messages_for_family,
+    install_k2_openai_patch,
+)
 
 _LLM = load_llm_settings()
 LLM_ENABLE_THINKING = _LLM["enable_thinking"]
 LLM_THINKING_BUDGET = _LLM["thinking_budget"]
 LLM_MAX_TOKENS = _LLM["max_tokens"]
 LLM_TEMPERATURE = _LLM["temperature"]
+LLM_MODEL_FAMILY = _LLM["family"]
+if LLM_MODEL_FAMILY == "k2":
+    install_k2_openai_patch()
 
 llm = ChatOpenAI(
     model=_LLM["model"],
@@ -139,10 +146,10 @@ llm = ChatOpenAI(
     top_p=_LLM["top_p"],
     streaming=True,
     max_tokens=_LLM["max_tokens"],
+    timeout=_LLM.get("timeout_seconds", 600.0),
     extra_body=extra_body_from_settings(_LLM),
 )
 
-# Bind tools to the LLM
 llm_with_tools = llm.bind_tools(tools)
 
 SYSTEM_PROMPT = """You are OmniLocal-LeadAgent, an advanced, locally-hosted AI Supervisor with Full Coding, Workspace Exploration, MCP Database Introspection, Episodic Memory, GraphRAG Knowledge Graph, and Parallel Subagent Orchestration capabilities.
@@ -158,13 +165,13 @@ Episodic Memory & Long-Term Recall:
 - Use `store_episodic_memory` to save important user preferences, rules, or key project insights into persistent long-term vector memory.
 
 Parallel Subagent Capabilities:
-- When a user request is complex, comparative, or multi-faceted (e.g. 'Compare X and Y, analyze DB records for Z, and test code for W'), you can use `spawn_parallel_subagents` to delegate up to 4 independent subtasks to run in parallel simultaneously across Ollama's 4 concurrent GPU slots.
-- Available subagent roles: 'researcher', 'coder', 'data_analyst', 'rag_specialist', 'custom'.
+- When a user request is complex, comparative, or multi-faceted, use `spawn_parallel_subagents` to delegate independent subtasks.
+- Parallelism is limited by server capacity (currently {max_parallel} concurrent requests). Roles: researcher, coder, data_analyst, rag_specialist, custom.
 
 Software Builds & Multi-Step Work:
 - Do not implement a full multi-file app in one message. Split work and use tools.
-- For "build an app": short plan → `spawn_parallel_subagents` in phases (skeleton, feature, tests) → short status.
-- Coder subtasks must `write_local_file` one small file per call. Paths are relative to the sandbox root (`app.py`, `pkg/mod.py`) — never write `workspace/app.py`.
+- For "build an app": short plan → `spawn_parallel_subagents` in phases → short status.
+- Coder subtasks: `write_local_file` one small file per call (`app.py`, `pkg/mod.py`).
 - Final reply: what was built, where files live, how to run — not the full source dump.
 
 MCP Database Introspection & Querying:
@@ -201,10 +208,10 @@ Sandbox Shell Notes:
 
 Always answer accurately based on the information returned by the tools.
 If you don't know the answer even after searching, say you don't know.
-"""
+""".format(max_parallel=_LLM.get("max_parallel", 4))
 
 
-# 4. Define Graph Nodes
+# 4. Graph nodes
 def agent_node(state: AgentState):
     messages = list(state["messages"] or [])
 
@@ -219,8 +226,8 @@ def agent_node(state: AgentState):
 
     # Keep the recent window small: system prompt + tool schemas already use several thousand tokens.
     compacted_messages = compact_messages_window(messages, max_recent=6)
+    compacted_messages = sanitize_messages_for_family(compacted_messages, LLM_MODEL_FAMILY)
 
-    # Guard to prevent "no user query found in messages" errors in Qwen/Ollama chat templates
     has_user = any(isinstance(m, HumanMessage) and bool(str(m.content).strip()) for m in compacted_messages)
     if not has_user:
         compacted_messages.append(HumanMessage(content="Please proceed with the task."))
@@ -354,10 +361,8 @@ workflow.add_conditional_edges(
 workflow.add_edge("action", "grade_retrieval")
 workflow.add_edge("grade_retrieval", "agent")
 
-# Compile the graph
 app = workflow.compile()
 
-# Helper function to run the agent
 def run_agent(query: str):
     inputs = {"messages": [HumanMessage(content=query)]}
     for event in app.stream(inputs, stream_mode="values"):

@@ -26,7 +26,25 @@ _BINARY_EXTS = {
 
 def set_citations(items: List[Dict[str, Any]]) -> None:
     global _citations
-    _citations = [enrich_citation(c) for c in items]
+    filtered = []
+    for c in items:
+        ec = enrich_citation(c)
+        src = (ec.get("source") or "").lower()
+        if src.endswith((".db", ".sqlite", ".sqlite3")) or src in {
+            "chat_sessions.db",
+            "web_search_cache.db",
+        }:
+            continue
+        if ec.get("kind") == "graphrag":
+            filtered.append(ec)
+            continue
+        path = ec.get("path") or ""
+        if path and not ec.get("readable") and ec.get("exists"):
+            # Binary/on-disk file that cannot be shown — still useful if user wants download
+            filtered.append(ec)
+            continue
+        filtered.append(ec)
+    _citations = filtered
 
 
 def get_citations() -> List[Dict[str, Any]]:

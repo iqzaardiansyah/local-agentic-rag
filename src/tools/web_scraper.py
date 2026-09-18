@@ -9,7 +9,6 @@ def read_webpage(url: str) -> str:
     Use this after doing a web_search if you need to read the full article or documentation from a specific URL.
     """
     try:
-        # Use a standard user-agent to avoid basic blocks
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
@@ -32,7 +31,6 @@ def read_webpage(url: str) -> str:
         # Drop blank lines
         text = '\n'.join(chunk for chunk in chunks if chunk)
         
-        # Limit to first 10,000 characters to avoid blowing up the LLM context limit
         if len(text) > 10000:
             text = text[:10000] + "\n...[Content truncated due to length]..."
             

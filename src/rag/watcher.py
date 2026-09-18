@@ -15,7 +15,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 FINGERPRINT_PATH = os.path.join(DATA_DIR, ".index_fingerprint.json")
 
-# Files that are runtime/DB artifacts and should not force a reindex.
+# Runtime files that should not trigger a reindex.
 _SKIP_NAMES = {
     "chat_sessions.db",
     "web_search_cache.db",

@@ -8,7 +8,7 @@ from typing import List, Sequence
 from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 
-# Dedicated workspace directory to contain all agent-generated artifacts
+# Sandbox for agent-generated artifacts
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WORKSPACE_DIR = os.path.join(ROOT_DIR, "workspace")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
@@ -330,9 +330,8 @@ def read_local_file(file_path: str) -> str:
 def write_local_file(file_path: str, content: str) -> str:
     """
     Write a file inside the ./workspace sandbox.
-    Use paths relative to the sandbox root (e.g. `app.py` or `pkg/mod.py`).
-    Do not prefix with `workspace/` — that would create workspace/workspace/.
-    Prefer one focused file per call; split large apps across multiple writes.
+    Use sandbox-relative paths (`app.py`, `pkg/mod.py`).
+    Prefer one focused file per call.
     """
     if content and len(content) > 80_000:
         return "Error: content too large for one call. Split into smaller files."

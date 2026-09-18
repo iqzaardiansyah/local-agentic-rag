@@ -90,8 +90,6 @@ def init_database():
 
 init_database()
 
-# --- Core Introspection Engine ---
-
 def list_tables() -> List[Dict[str, Any]]:
     """Returns all tables in the SQLite database with their live row count."""
     conn = sqlite3.connect(DB_PATH)
@@ -147,7 +145,6 @@ def execute_read_query(query: str, max_rows: int = 100) -> Dict[str, Any]:
     Rejects any non-SELECT statements.
     """
     cleaned = query.strip()
-    # Guard against destructive keywords
     disallowed_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "ATTACH", "DETACH", "PRAGMA", "VACUUM", "REPLACE"]
     first_word = cleaned.split()[0].upper() if cleaned else ""
     
@@ -182,8 +179,6 @@ def execute_read_query(query: str, max_rows: int = 100) -> Dict[str, Any]:
         return {"success": False, "error": f"SQL Execution Error: {str(e)}"}
     finally:
         conn.close()
-
-# --- Model Context Protocol (MCP) JSON-RPC 2.0 Handler ---
 
 MCP_TOOLS_MANIFEST = [
     {

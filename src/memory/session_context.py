@@ -12,8 +12,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from src.memory import chat_sessions
 
-# Keep agent input bounded even with long sessions.
-DEFAULT_MAX_TURNS = 24  # user+assistant pairs ≈ 48 messages
+# Bound session history sent to the model.
+DEFAULT_MAX_TURNS = 24
 CROSS_SESSION_LIMIT = 3
 EPISODIC_TOP_K = 3
 
@@ -58,7 +58,6 @@ def get_cross_session_brief(
                     mlines.append(f"- [{m.get('category', 'general')}] {m.get('fact', '')}")
                 parts.append("\n".join(mlines))
         except Exception:
-            # Episodic store may be empty/unavailable; never block the turn.
             pass
 
     if not parts:
@@ -152,7 +151,6 @@ def persist_turn(
     if not session_id:
         return
     if not skip_user_if_saved:
-        # Guard against double-save if UI already wrote the user message.
         existing = chat_sessions.load_messages(session_id, limit=4)
         last_user = next(
             (m["content"] for m in reversed(existing) if m["role"] == "user"), None
